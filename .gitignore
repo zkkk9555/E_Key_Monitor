@@ -1,0 +1,51 @@
+# .NET build output
+[Bb]in/
+[Oo]bj/
+
+# Local .NET and agent/tool state
+.appdata/
+.dotnet-home/
+.nuget/
+.agents/
+.codex/
+
+# Visual Studio and IDE user state
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+
+# Test and coverage output
+TestResults/
+coverage/
+*.trx
+*.coverage
+*.coveragexml
+
+# Generated packages, archives, logs, dumps, and shortcuts
+artifacts/
+*.nupkg
+*.snupkg
+*.zip
+*.log
+*.dmp
+*.lnk
+
+# Windows metadata
+Thumbs.db
+Desktop.ini
+
+# Local environment and credential material
+.env
+.env.*
+!.env.example
+*.pem
+*.pfx
+*.p12
+*.key
+*.crt
+*.cer
+*.der

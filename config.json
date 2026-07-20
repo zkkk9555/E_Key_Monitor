@@ -1,0 +1,12 @@
+{
+  "key": "E",
+  "activeTime": 200,
+  "windowSize": 40,
+  "opacity": 0.8,
+  "dotSize": "Medium",
+  "position": "MiddleLeft",
+  "customX": null,
+  "customY": null,
+  "clickThrough": true,
+  "gameDirectory": null
+}

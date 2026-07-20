@@ -1,0 +1,1713 @@
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Windows.Forms;
+
+namespace E_Key_Monitor;
+
+internal enum DotSizeOption
+{
+    Small,
+    Medium,
+    Large
+}
+
+internal enum DockPosition
+{
+    TopRight,
+    MiddleRight,
+    BottomRight,
+    BottomLeft,
+    MiddleLeft,
+    TopLeft,
+    Custom
+}
+
+internal sealed class MonitorSettings
+{
+    public string Key { get; set; } = "E";
+    public int ActiveTimeMs { get; set; } = 200;
+    public int WindowSize { get; set; } = 40;
+    public double Opacity { get; set; } = 0.8;
+    public DotSizeOption DotSize { get; set; } = DotSizeOption.Medium;
+    public DockPosition Position { get; set; } = DockPosition.MiddleLeft;
+    public int? CustomX { get; set; }
+    public int? CustomY { get; set; }
+    public bool ClickThrough { get; set; } = true;
+    public string? GameDirectory { get; set; }
+
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        AllowTrailingCommas = true,
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        WriteIndented = true
+    };
+
+    public static MonitorSettings Load()
+    {
+        string configPath = GetConfigPath();
+        if (!File.Exists(configPath))
+        {
+            return new MonitorSettings();
+        }
+
+        try
+        {
+            string json = File.ReadAllText(configPath);
+            MonitorConfigDto? dto = JsonSerializer.Deserialize<MonitorConfigDto>(json, JsonOptions);
+            return Merge(dto);
+        }
+        catch
+        {
+            return new MonitorSettings();
+        }
+    }
+
+    public void Save()
+    {
+        MonitorConfigDto dto = new()
+        {
+            Key = Key,
+            ActiveTime = ActiveTimeMs,
+            WindowSize = WindowSize,
+            Opacity = Opacity,
+            DotSize = DotSize.ToString(),
+            Position = Position.ToString(),
+            CustomX = CustomX,
+            CustomY = CustomY,
+            ClickThrough = ClickThrough,
+            GameDirectory = GameDirectory
+        };
+
+        string configPath = GetConfigPath();
+        string? directory = Path.GetDirectoryName(configPath);
+        if (!string.IsNullOrEmpty(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        string json = JsonSerializer.Serialize(dto, JsonOptions);
+        File.WriteAllText(configPath, json);
+    }
+
+    private static string GetConfigPath()
+    {
+        return Path.Combine(AppContext.BaseDirectory, "config.json");
+    }
+
+    private static MonitorSettings Merge(MonitorConfigDto? dto)
+    {
+        MonitorSettings settings = new();
+
+        if (dto is null)
+        {
+            return settings;
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.Key))
+        {
+            settings.Key = dto.Key.Trim();
+        }
+
+        if (dto.ActiveTime is > 0)
+        {
+            settings.ActiveTimeMs = Math.Clamp(dto.ActiveTime.Value, 1, 10000);
+        }
+
+        if (dto.WindowSize is > 0)
+        {
+            settings.WindowSize = Math.Clamp(dto.WindowSize.Value, 24, 400);
+        }
+
+        if (dto.Opacity is > 0)
+        {
+            settings.Opacity = Math.Clamp(dto.Opacity.Value, 0.1, 1.0);
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.DotSize) &&
+            Enum.TryParse(dto.DotSize, true, out DotSizeOption dotSize))
+        {
+            settings.DotSize = dotSize;
+        }
+
+        if (!string.IsNullOrWhiteSpace(dto.Position) &&
+            Enum.TryParse(dto.Position, true, out DockPosition position))
+        {
+            settings.Position = position;
+        }
+
+        settings.CustomX = dto.CustomX;
+        settings.CustomY = dto.CustomY;
+
+        if (!string.IsNullOrWhiteSpace(dto.GameDirectory))
+        {
+            settings.GameDirectory = dto.GameDirectory.Trim();
+        }
+
+        if (dto.ClickThrough.HasValue)
+        {
+            settings.ClickThrough = dto.ClickThrough.Value;
+        }
+
+        return settings;
+    }
+
+    private sealed class MonitorConfigDto
+    {
+        [JsonPropertyName("key")]
+        public string? Key { get; set; }
+
+        [JsonPropertyName("activeTime")]
+        public int? ActiveTime { get; set; }
+
+        [JsonPropertyName("windowSize")]
+        public int? WindowSize { get; set; }
+
+        [JsonPropertyName("opacity")]
+        public double? Opacity { get; set; }
+
+        [JsonPropertyName("dotSize")]
+        public string? DotSize { get; set; }
+
+        [JsonPropertyName("position")]
+        public string? Position { get; set; }
+
+        [JsonPropertyName("customX")]
+        public int? CustomX { get; set; }
+
+        [JsonPropertyName("customY")]
+        public int? CustomY { get; set; }
+
+        [JsonPropertyName("clickThrough")]
+        public bool? ClickThrough { get; set; }
+
+        [JsonPropertyName("gameDirectory")]
+        public string? GameDirectory { get; set; }
+    }
+}
+
+internal sealed class MainForm : Form
+{
+    private const int VkE = 0x45;
+    private const int WmKeyDown = 0x0100;
+    private const int WmSysKeyDown = 0x0104;
+    private const int WhKeyboardLl = 13;
+    private const int WsExTransparent = 0x00000020;
+    private const int WsExToolWindow = 0x00000080;
+    private const int WsExLayered = 0x00080000;
+    private const int WsExNoActivate = 0x08000000;
+    private const int GwlExStyle = -20;
+    private const int PlacementMargin = 16;
+    private const int DotMargin = 6;
+    private const string FollowedProcessName = "NarakaBladepoint";
+    private const uint BiRgb = 0;
+    private const uint DibRgbColors = 0;
+    private const uint UlwAlpha = 0x00000002;
+    private const byte AcSrcOver = 0x00;
+    private const byte AcSrcAlpha = 0x01;
+    private const uint SwpNoSize = 0x0001;
+    private const uint SwpNoMove = 0x0002;
+    private const uint SwpNoActivate = 0x0010;
+    private const uint SwpFrameChanged = 0x0020;
+
+    private static readonly TimeSpan GameStartTimeout = TimeSpan.FromMinutes(10);
+    private static readonly TimeSpan GameExitGracePeriod = TimeSpan.FromSeconds(5);
+    private static readonly IntPtr HwndTopMost = new(-1);
+    private static readonly IntPtr HgdiError = new(-1);
+    private static readonly Color ActiveDotColor = Color.FromArgb(255, 65, 255, 145);
+    private static readonly Color InactiveDotColor = Color.FromArgb(255, 235, 235, 235);
+
+    private readonly MonitorSettings _settings;
+    private readonly Icon? _applicationIcon;
+    private readonly System.Windows.Forms.Timer _statusTimer;
+    private readonly System.Windows.Forms.Timer? _gameTimer;
+    private readonly NotifyIcon _trayIcon;
+    private readonly ContextMenuStrip _dotMenu;
+    private readonly ContextMenuStrip _trayMenu;
+    private readonly MenuItemSet _dotMenuItems;
+    private readonly MenuItemSet _trayMenuItems;
+    private readonly bool _followGame;
+    private readonly long _gameStartTick;
+
+    private LowLevelKeyboardProc? _keyboardProc;
+    private IntPtr _hookHandle = IntPtr.Zero;
+    private long _lastTriggerTick = -1_000_000;
+    private bool _isActive;
+    private bool _clickThrough;
+    private bool _shuttingDown;
+    private bool _placementInitialized;
+    private bool _resourcesDisposed;
+    private bool _initialRenderCompleted;
+    private bool _initialRenderFailureShown;
+    private bool _isDragging;
+    private bool _dragMoved;
+    private bool _gameSeen;
+    private bool _gameStartTimeoutNotified;
+    private long? _gameMissingSinceTick;
+    private string? _lastDiagnosticLogPath;
+
+    private int _windowSize;
+    private int _activeTimeMs;
+    private double _windowOpacity;
+    private DotSizeOption _dotSize;
+    private DockPosition _position;
+    private Point _dragStartCursor;
+    private Point _dragStartLocation;
+
+    public MainForm(bool followGame)
+    {
+        _followGame = followGame;
+        _gameStartTick = Environment.TickCount64;
+        _settings = MonitorSettings.Load();
+        _windowSize = _settings.WindowSize;
+        _activeTimeMs = _settings.ActiveTimeMs;
+        _windowOpacity = _settings.Opacity;
+        _dotSize = _settings.DotSize;
+        _position = _settings.Position;
+        _clickThrough = _settings.ClickThrough;
+
+        Text = "E Key Monitor";
+        AutoScaleMode = AutoScaleMode.None;
+        StartPosition = FormStartPosition.Manual;
+        FormBorderStyle = FormBorderStyle.None;
+        ShowInTaskbar = false;
+        TopMost = true;
+        ClientSize = new Size(_windowSize, _windowSize);
+
+        _statusTimer = new System.Windows.Forms.Timer
+        {
+            Interval = 50
+        };
+        _statusTimer.Tick += (_, _) => UpdateActivationState();
+
+        if (_followGame)
+        {
+            _gameTimer = new System.Windows.Forms.Timer
+            {
+                Interval = 1000
+            };
+            _gameTimer.Tick += (_, _) => UpdateGameFollowState();
+        }
+
+        _dotMenu = BuildSettingsMenu(out _dotMenuItems);
+        _trayMenu = BuildSettingsMenu(out _trayMenuItems);
+
+        _applicationIcon = LoadApplicationIcon();
+        _trayIcon = new NotifyIcon
+        {
+            Icon = _applicationIcon ?? SystemIcons.Application,
+            Visible = true,
+            Text = "E Key Monitor",
+            ContextMenuStrip = _trayMenu
+        };
+
+        MouseDown += HandleMouseDown;
+        MouseMove += HandleMouseMove;
+        MouseUp += HandleMouseUp;
+        MouseCaptureChanged += HandleMouseCaptureChanged;
+        SizeChanged += (_, _) =>
+        {
+            Location = ClampLocationToWorkingArea(Location, Screen.FromRectangle(Bounds).WorkingArea);
+            if (_initialRenderCompleted)
+            {
+                RenderLayeredWindow();
+            }
+        };
+
+        ApplyPlacement(_position);
+        _placementInitialized = true;
+        UpdateMenuChecks();
+    }
+
+    protected override bool ShowWithoutActivation => true;
+
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            CreateParams cp = base.CreateParams;
+            cp.ExStyle |= WsExToolWindow | WsExNoActivate | WsExLayered;
+            if (_clickThrough)
+            {
+                cp.ExStyle |= WsExTransparent;
+            }
+
+            return cp;
+        }
+    }
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+
+        try
+        {
+            if (!EnsureGameDirectoryConfigured())
+            {
+                RequestShutdown();
+                return;
+            }
+
+            InstallKeyboardHook();
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                this,
+                $"无法安装全局 E 键监听。\n\n错误信息：{ex.Message}\n\n程序将安全退出。",
+                "E Key Monitor",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            BeginInvoke(RequestShutdown);
+        }
+    }
+
+    protected override void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+
+        // Run after the first visible message so the layered window has a live handle.
+        BeginInvoke(InitializeVisibleWindow);
+    }
+
+    protected override void OnPaintBackground(PaintEventArgs e)
+    {
+        // The visual surface is supplied by UpdateLayeredWindow.
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        // Avoid normal WinForms painting so the layered bitmap owns all pixels.
+    }
+
+    protected override void OnFormClosed(FormClosedEventArgs e)
+    {
+        CleanupResources();
+        base.OnFormClosed(e);
+    }
+
+    private ContextMenuStrip BuildSettingsMenu(out MenuItemSet items)
+    {
+        ContextMenuStrip menu = new();
+        ToolStripMenuItem gameDirectoryItem = new("Set game directory...", null, (_, _) => SelectGameDirectory());
+
+        ToolStripMenuItem clickThroughItem = new("鼠标穿透", null, (_, _) => SetClickThrough(!_clickThrough));
+
+        ToolStripMenuItem sizeMenu = new("切换大小");
+        ToolStripMenuItem smallSizeItem = new("小", null, (_, _) => SetDotSize(DotSizeOption.Small));
+        ToolStripMenuItem mediumSizeItem = new("中", null, (_, _) => SetDotSize(DotSizeOption.Medium));
+        ToolStripMenuItem largeSizeItem = new("大", null, (_, _) => SetDotSize(DotSizeOption.Large));
+        sizeMenu.DropDownItems.AddRange(new ToolStripItem[]
+        {
+            smallSizeItem,
+            mediumSizeItem,
+            largeSizeItem
+        });
+
+        ToolStripMenuItem positionMenu = new("切换位置");
+        ToolStripMenuItem topRightItem = new("右上", null, (_, _) => SetDockPosition(DockPosition.TopRight));
+        ToolStripMenuItem middleRightItem = new("右中", null, (_, _) => SetDockPosition(DockPosition.MiddleRight));
+        ToolStripMenuItem bottomRightItem = new("右下", null, (_, _) => SetDockPosition(DockPosition.BottomRight));
+        ToolStripMenuItem bottomLeftItem = new("左下", null, (_, _) => SetDockPosition(DockPosition.BottomLeft));
+        ToolStripMenuItem middleLeftItem = new("左中", null, (_, _) => SetDockPosition(DockPosition.MiddleLeft));
+        ToolStripMenuItem topLeftItem = new("左上", null, (_, _) => SetDockPosition(DockPosition.TopLeft));
+        positionMenu.DropDownItems.AddRange(new ToolStripItem[]
+        {
+            topRightItem,
+            middleRightItem,
+            bottomRightItem,
+            bottomLeftItem,
+            middleLeftItem,
+            topLeftItem
+        });
+
+        ToolStripMenuItem exitItem = new("退出", null, (_, _) => RequestShutdown());
+
+        menu.Items.Add(clickThroughItem);
+        menu.Items.Add(gameDirectoryItem);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(sizeMenu);
+        menu.Items.Add(positionMenu);
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add(exitItem);
+        menu.Opening += (_, _) => UpdateMenuChecks();
+
+        items = new MenuItemSet(
+            clickThroughItem,
+            gameDirectoryItem,
+            smallSizeItem,
+            mediumSizeItem,
+            largeSizeItem,
+            topRightItem,
+            middleRightItem,
+            bottomRightItem,
+            bottomLeftItem,
+            middleLeftItem,
+            topLeftItem);
+
+        return menu;
+    }
+
+    private bool EnsureGameDirectoryConfigured()
+    {
+        if (TryNormalizeAndValidateDirectory(_settings.GameDirectory, out string? normalizedDirectory, out _))
+        {
+            _settings.GameDirectory = normalizedDirectory;
+            return true;
+        }
+
+        while (!_shuttingDown)
+        {
+            using FolderBrowserDialog dialog = new()
+            {
+                Description = "Select the folder containing StartGame.exe and NarakaBladepoint.exe.",
+                ShowNewFolderButton = false,
+                SelectedPath = Directory.Exists(_settings.GameDirectory) ? _settings.GameDirectory : string.Empty
+            };
+
+            if (dialog.ShowDialog(this) != DialogResult.OK)
+            {
+                return false;
+            }
+
+            if (!TryNormalizeAndValidateDirectory(dialog.SelectedPath, out normalizedDirectory, out string error))
+            {
+                MessageBox.Show(this, error, "E Key Monitor", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                continue;
+            }
+
+            string? previousDirectory = _settings.GameDirectory;
+            _settings.GameDirectory = normalizedDirectory;
+            try
+            {
+                _settings.Save();
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _settings.GameDirectory = previousDirectory;
+                LogDiagnostic("Save game directory", 0, ex);
+                MessageBox.Show(this, $"The game directory could not be saved. The previous setting was kept.\n\n{ex.Message}", "E Key Monitor", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                continue;
+            }
+        }
+
+        return false;
+    }
+
+    private void SelectGameDirectory()
+    {
+        string? previousDirectory = _settings.GameDirectory;
+        using FolderBrowserDialog dialog = new()
+        {
+            Description = "Select the folder containing StartGame.exe and NarakaBladepoint.exe.",
+            ShowNewFolderButton = false,
+            SelectedPath = Directory.Exists(previousDirectory) ? previousDirectory : string.Empty
+        };
+
+        if (dialog.ShowDialog(this) != DialogResult.OK)
+        {
+            return;
+        }
+
+        if (!TryNormalizeAndValidateDirectory(dialog.SelectedPath, out string? normalizedDirectory, out string error))
+        {
+            MessageBox.Show(this, error, "E Key Monitor", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
+        _settings.GameDirectory = normalizedDirectory;
+        try
+        {
+            _settings.Save();
+        }
+        catch (Exception ex)
+        {
+            _settings.GameDirectory = previousDirectory;
+            LogDiagnostic("Save game directory", 0, ex);
+            MessageBox.Show(this, $"The game directory could not be saved. The previous setting was kept.\n\n{ex.Message}", "E Key Monitor", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private static bool TryNormalizeAndValidateDirectory(string? directoryPath, out string? normalizedDirectory, out string error)
+    {
+        normalizedDirectory = null;
+        error = "Select a folder containing both StartGame.exe and NarakaBladepoint.exe.";
+
+        if (string.IsNullOrWhiteSpace(directoryPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            normalizedDirectory = Path.GetFullPath(directoryPath.Trim());
+            if (!Directory.Exists(normalizedDirectory))
+            {
+                error = "The selected path is not an existing folder.";
+                normalizedDirectory = null;
+                return false;
+            }
+
+            if (!IsRegularFile(Path.Combine(normalizedDirectory, "StartGame.exe")) ||
+                !IsRegularFile(Path.Combine(normalizedDirectory, "NarakaBladepoint.exe")))
+            {
+                error = "The selected folder must contain regular files named StartGame.exe and NarakaBladepoint.exe.";
+                normalizedDirectory = null;
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            error = $"The selected path is invalid.\n\n{ex.Message}";
+            return false;
+        }
+    }
+
+    private static bool IsRegularFile(string path)
+    {
+        try
+        {
+            return File.Exists(path) && (File.GetAttributes(path) & FileAttributes.Directory) == 0;
+        }
+        catch (IOException)
+        {
+            return false;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
+    private static Icon? LoadApplicationIcon()
+    {
+        try
+        {
+            return Icon.ExtractAssociatedIcon(Application.ExecutablePath);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private void InstallKeyboardHook()
+    {
+        if (_hookHandle != IntPtr.Zero)
+        {
+            return;
+        }
+
+        _keyboardProc = HookCallback;
+        IntPtr moduleHandle = GetCurrentModuleHandle();
+        _hookHandle = SetWindowsHookEx(WhKeyboardLl, _keyboardProc, moduleHandle, 0);
+
+        if (_hookHandle == IntPtr.Zero)
+        {
+            int error = Marshal.GetLastWin32Error();
+            throw new InvalidOperationException($"SetWindowsHookEx(WH_KEYBOARD_LL) 失败，Win32Error={error}。");
+        }
+    }
+
+    private static IntPtr GetCurrentModuleHandle()
+    {
+        using Process currentProcess = Process.GetCurrentProcess();
+        string? moduleName = currentProcess.MainModule?.ModuleName;
+        return GetModuleHandle(moduleName);
+    }
+
+    private IntPtr HookCallback(int nCode, IntPtr wParam, IntPtr lParam)
+    {
+        try
+        {
+            if (nCode >= 0)
+            {
+                int message = wParam.ToInt32();
+                if (message is WmKeyDown or WmSysKeyDown)
+                {
+                    int vkCode = Marshal.ReadInt32(lParam);
+                    if (vkCode == VkE)
+                    {
+                        _lastTriggerTick = Environment.TickCount64;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Always keep the low-level keyboard hook chain moving.
+        }
+
+        return CallNextHookEx(_hookHandle, nCode, wParam, lParam);
+    }
+
+    private void UpdateActivationState()
+    {
+        long now = Environment.TickCount64;
+        bool shouldBeActive = now - _lastTriggerTick <= _activeTimeMs;
+
+        if (shouldBeActive != _isActive)
+        {
+            _isActive = shouldBeActive;
+            RenderLayeredWindow();
+        }
+    }
+
+    private void InitializeVisibleWindow()
+    {
+        if (_shuttingDown || _resourcesDisposed || IsDisposed)
+        {
+            return;
+        }
+
+        ApplyPlacement(_position);
+
+        if (!ApplyClickThroughStyle() || !RenderLayeredWindow())
+        {
+            ShowInitialRenderFailureAndExit();
+            return;
+        }
+
+        _initialRenderCompleted = true;
+        _statusTimer.Start();
+        _gameTimer?.Start();
+    }
+
+    private bool RenderLayeredWindow()
+    {
+        if (_resourcesDisposed)
+        {
+            return LogRenderFailure(
+                "Validate window resources",
+                0,
+                new ObjectDisposedException(nameof(MainForm)));
+        }
+
+        IntPtr windowHandle = IsHandleCreated ? Handle : IntPtr.Zero;
+        if (windowHandle == IntPtr.Zero || !Visible)
+        {
+            return LogRenderFailure(
+                "Validate visible window handle",
+                0,
+                new InvalidOperationException(
+                    $"IsHandleCreated={IsHandleCreated}, Handle=0x{windowHandle.ToInt64():X}, Visible={Visible}."));
+        }
+
+        int width = ClientSize.Width;
+        int height = ClientSize.Height;
+        if (width <= 0 || height <= 0)
+        {
+            return LogRenderFailure(
+                "Validate window size",
+                0,
+                new InvalidOperationException($"Invalid client size: {width}x{height}."));
+        }
+
+        Rectangle windowBounds = new(Left, Top, width, height);
+        Rectangle workingArea = Screen.FromRectangle(windowBounds).WorkingArea;
+        if (!workingArea.Contains(windowBounds))
+        {
+            return LogRenderFailure(
+                "Validate window coordinates",
+                0,
+                new InvalidOperationException(
+                    $"Window bounds {windowBounds} are outside working area {workingArea}."));
+        }
+
+        long requiredStyles = WsExLayered | WsExNoActivate | WsExToolWindow;
+        Marshal.SetLastPInvokeError(0);
+        long currentStyles = GetWindowLongPtrCompat(windowHandle, GwlExStyle).ToInt64();
+        int getStyleError = Marshal.GetLastWin32Error();
+        if (currentStyles == 0 && getStyleError != 0)
+        {
+            return LogRenderFailure("GetWindowLongPtr(validate GWL_EXSTYLE)", getStyleError);
+        }
+
+        if ((currentStyles & requiredStyles) != requiredStyles)
+        {
+            return LogRenderFailure(
+                "Validate layered window style",
+                0,
+                new InvalidOperationException($"Extended style 0x{currentStyles:X} does not include 0x{requiredStyles:X}."));
+        }
+
+        int diameter = GetEffectiveDotDiameter();
+        int maxDiameter = Math.Min(width, height) - DotMargin;
+        if (diameter <= 0 || maxDiameter <= 0 || diameter > maxDiameter)
+        {
+            return LogRenderFailure(
+                "Validate dot diameter",
+                0,
+                new InvalidOperationException(
+                    $"Diameter={diameter}, maximum={maxDiameter}, client size={width}x{height}."));
+        }
+
+        int x = (width - diameter) / 2;
+        int y = (height - diameter) / 2;
+        if (x < 0 || y < 0 || x + diameter > width || y + diameter > height)
+        {
+            return LogRenderFailure(
+                "Validate dot coordinates",
+                0,
+                new InvalidOperationException(
+                    $"Dot bounds ({x}, {y}, {diameter}, {diameter}) exceed client size {width}x{height}."));
+        }
+
+        byte sourceConstantAlpha = GetLayerOpacityByte();
+        if (sourceConstantAlpha == 0)
+        {
+            return LogRenderFailure(
+                "Validate source alpha",
+                0,
+                new InvalidOperationException("SourceConstantAlpha must be greater than zero."));
+        }
+
+        bool renderSucceeded = false;
+        bool cleanupSucceeded = true;
+        IntPtr screenDc = IntPtr.Zero;
+        IntPtr memoryDc = IntPtr.Zero;
+        IntPtr hBitmap = IntPtr.Zero;
+        IntPtr oldBitmap = IntPtr.Zero;
+        string currentStep = "Initialize layered render";
+
+        try
+        {
+            do
+            {
+                currentStep = "GetDC";
+                Marshal.SetLastPInvokeError(0);
+                screenDc = GetDC(IntPtr.Zero);
+                if (screenDc == IntPtr.Zero)
+                {
+                    LogRenderFailure(currentStep, Marshal.GetLastWin32Error());
+                    break;
+                }
+
+                currentStep = "CreateCompatibleDC";
+                Marshal.SetLastPInvokeError(0);
+                memoryDc = CreateCompatibleDC(screenDc);
+                if (memoryDc == IntPtr.Zero)
+                {
+                    LogRenderFailure(currentStep, Marshal.GetLastWin32Error());
+                    break;
+                }
+
+                int stride = checked(width * 4);
+                BitmapInfo bitmapInfo = new()
+                {
+                    Header = new BitmapInfoHeader
+                    {
+                        Size = (uint)Marshal.SizeOf<BitmapInfoHeader>(),
+                        Width = width,
+                        Height = -height,
+                        Planes = 1,
+                        BitCount = 32,
+                        Compression = BiRgb,
+                        SizeImage = checked((uint)(stride * height))
+                    }
+                };
+
+                currentStep = "CreateDIBSection";
+                Marshal.SetLastPInvokeError(0);
+                hBitmap = CreateDIBSection(
+                    screenDc,
+                    ref bitmapInfo,
+                    DibRgbColors,
+                    out IntPtr pixelBuffer,
+                    IntPtr.Zero,
+                    0);
+                if (hBitmap == IntPtr.Zero || pixelBuffer == IntPtr.Zero)
+                {
+                    LogRenderFailure(currentStep, Marshal.GetLastWin32Error());
+                    break;
+                }
+
+                currentStep = "SelectObject(layered bitmap)";
+                Marshal.SetLastPInvokeError(0);
+                oldBitmap = SelectObject(memoryDc, hBitmap);
+                if (!IsValidGdiObject(oldBitmap))
+                {
+                    LogRenderFailure(currentStep, Marshal.GetLastWin32Error());
+                    break;
+                }
+
+                currentStep = "Draw premultiplied alpha bitmap";
+                using (Bitmap bitmap = new(width, height, stride, PixelFormat.Format32bppPArgb, pixelBuffer))
+                using (Graphics graphics = Graphics.FromImage(bitmap))
+                using (SolidBrush brush = new(GetCurrentDotColor()))
+                {
+                    graphics.Clear(Color.Transparent);
+                    graphics.SmoothingMode = SmoothingMode.AntiAlias;
+                    graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    graphics.CompositingQuality = CompositingQuality.HighQuality;
+                    graphics.FillEllipse(brush, new Rectangle(x, y, diameter, diameter));
+                    graphics.Flush();
+                }
+
+                int backgroundAlpha = Marshal.ReadByte(pixelBuffer, 3);
+                int centerPixelOffset = ((y + diameter / 2) * stride) + ((x + diameter / 2) * 4) + 3;
+                int centerAlpha = Marshal.ReadByte(pixelBuffer, centerPixelOffset);
+                if (backgroundAlpha != 0 || centerAlpha == 0)
+                {
+                    LogRenderFailure(
+                        "Validate DIB alpha pixels",
+                        0,
+                        new InvalidOperationException(
+                            $"Background alpha={backgroundAlpha}, center alpha={centerAlpha}."));
+                    break;
+                }
+
+                PointStruct topPosition = new(Left, Top);
+                SizeStruct size = new(width, height);
+                PointStruct sourcePosition = new(0, 0);
+                BlendFunction blend = new()
+                {
+                    BlendOp = AcSrcOver,
+                    BlendFlags = 0,
+                    SourceConstantAlpha = sourceConstantAlpha,
+                    AlphaFormat = AcSrcAlpha
+                };
+
+                currentStep = "UpdateLayeredWindow";
+                Marshal.SetLastPInvokeError(0);
+                renderSucceeded = UpdateLayeredWindow(
+                    windowHandle,
+                    screenDc,
+                    ref topPosition,
+                    ref size,
+                    memoryDc,
+                    ref sourcePosition,
+                    0,
+                    ref blend,
+                    UlwAlpha);
+
+                if (!renderSucceeded)
+                {
+                    LogRenderFailure(currentStep, Marshal.GetLastWin32Error());
+                }
+            } while (false);
+        }
+        catch (Exception ex)
+        {
+            LogRenderFailure(currentStep, 0, ex);
+        }
+        finally
+        {
+            if (IsValidGdiObject(oldBitmap) && memoryDc != IntPtr.Zero)
+            {
+                Marshal.SetLastPInvokeError(0);
+                IntPtr restoreResult = SelectObject(memoryDc, oldBitmap);
+                if (!IsValidGdiObject(restoreResult))
+                {
+                    cleanupSucceeded = false;
+                    LogRenderFailure("SelectObject(restore previous bitmap)", Marshal.GetLastWin32Error());
+                }
+            }
+
+            if (memoryDc != IntPtr.Zero)
+            {
+                Marshal.SetLastPInvokeError(0);
+                if (!DeleteDC(memoryDc))
+                {
+                    cleanupSucceeded = false;
+                    LogRenderFailure("DeleteDC", Marshal.GetLastWin32Error());
+                }
+            }
+
+            if (hBitmap != IntPtr.Zero)
+            {
+                Marshal.SetLastPInvokeError(0);
+                if (!DeleteObject(hBitmap))
+                {
+                    cleanupSucceeded = false;
+                    LogRenderFailure("DeleteObject(layered bitmap)", Marshal.GetLastWin32Error());
+                }
+            }
+
+            if (screenDc != IntPtr.Zero)
+            {
+                Marshal.SetLastPInvokeError(0);
+                if (ReleaseDC(IntPtr.Zero, screenDc) == 0)
+                {
+                    cleanupSucceeded = false;
+                    LogRenderFailure("ReleaseDC", Marshal.GetLastWin32Error());
+                }
+            }
+        }
+
+        return renderSucceeded && cleanupSucceeded;
+    }
+
+    private bool LogRenderFailure(string step, int win32Error, Exception? exception = null)
+    {
+        LogDiagnostic(step, win32Error, exception);
+        return false;
+    }
+
+    private void LogDiagnostic(string step, int win32Error = 0, Exception? exception = null)
+    {
+        try
+        {
+            exception ??= win32Error != 0
+                ? new System.ComponentModel.Win32Exception(win32Error)
+                : null;
+
+            string entry =
+                $"[{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss.fff zzz}] " +
+                $"Step={step}; Win32Error={win32Error}; " +
+                $"Exception={(exception is null ? "none" : exception)}{Environment.NewLine}";
+
+            foreach (string path in GetDiagnosticLogPaths())
+            {
+                try
+                {
+                    string? directory = Path.GetDirectoryName(path);
+                    if (!string.IsNullOrEmpty(directory))
+                    {
+                        Directory.CreateDirectory(directory);
+                    }
+
+                    File.AppendAllText(path, entry);
+                    _lastDiagnosticLogPath = path;
+                    break;
+                }
+                catch
+                {
+                    // Try the next writable diagnostic location.
+                }
+            }
+        }
+        catch
+        {
+            // Diagnostics must never crash the monitor.
+        }
+    }
+
+    private static IEnumerable<string> GetDiagnosticLogPaths()
+    {
+        yield return Path.Combine(Environment.CurrentDirectory, "E_Key_Monitor.log");
+        yield return Path.Combine(AppContext.BaseDirectory, "E_Key_Monitor.log");
+
+        string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (!string.IsNullOrEmpty(localAppData))
+        {
+            yield return Path.Combine(localAppData, "E_Key_Monitor", "E_Key_Monitor.log");
+        }
+    }
+
+    private void ShowInitialRenderFailureAndExit()
+    {
+        if (_initialRenderFailureShown || _shuttingDown)
+        {
+            return;
+        }
+
+        _initialRenderFailureShown = true;
+        string logLocation = _lastDiagnosticLogPath ?? "日志写入失败，请检查目录写入权限";
+        MessageBox.Show(
+            this,
+            $"状态圆点首次绘制失败。\n\n诊断信息：\n{logLocation}\n\n程序将安全退出。",
+            "E Key Monitor",
+            MessageBoxButtons.OK,
+            MessageBoxIcon.Error);
+        RequestShutdown();
+    }
+
+    private void UpdateGameFollowState()
+    {
+        if (!_followGame || _shuttingDown || _resourcesDisposed)
+        {
+            return;
+        }
+
+        long now = Environment.TickCount64;
+        bool gameRunning;
+
+        try
+        {
+            gameRunning = IsFollowedGameRunning();
+        }
+        catch (Exception ex)
+        {
+            LogDiagnostic("Check followed game process", 0, ex);
+            if (_gameSeen)
+            {
+                _gameMissingSinceTick = null;
+            }
+
+            return;
+        }
+
+        if (gameRunning)
+        {
+            _gameSeen = true;
+            _gameMissingSinceTick = null;
+            return;
+        }
+
+        if (!_gameSeen)
+        {
+            if (!_gameStartTimeoutNotified &&
+                HasElapsed(_gameStartTick, now, GameStartTimeout))
+            {
+                _gameStartTimeoutNotified = true;
+                NotifyGameStartTimeoutAndExit();
+            }
+
+            return;
+        }
+
+        _gameMissingSinceTick ??= now;
+        if (HasElapsed(_gameMissingSinceTick.Value, now, GameExitGracePeriod))
+        {
+            RequestShutdown();
+        }
+    }
+
+    private static bool IsFollowedGameRunning()
+    {
+        Process[] processes = Process.GetProcessesByName(FollowedProcessName);
+        try
+        {
+            return processes.Length > 0;
+        }
+        finally
+        {
+            foreach (Process process in processes)
+            {
+                process.Dispose();
+            }
+        }
+    }
+
+    private void NotifyGameStartTimeoutAndExit()
+    {
+        try
+        {
+            _trayIcon.ShowBalloonTip(
+                5000,
+                "E Key Monitor",
+                "等待 NarakaBladepoint 启动超过 10 分钟，工具将退出。",
+                ToolTipIcon.Info);
+        }
+        catch (Exception ex)
+        {
+            LogDiagnostic("Show game start timeout notification", 0, ex);
+        }
+
+        RequestShutdown();
+    }
+
+    private static bool HasElapsed(long startTick, long nowTick, TimeSpan duration)
+    {
+        return nowTick - startTick >= (long)duration.TotalMilliseconds;
+    }
+
+    private static bool IsValidGdiObject(IntPtr value)
+    {
+        return value != IntPtr.Zero && value != HgdiError;
+    }
+
+    private byte GetLayerOpacityByte()
+    {
+        int alpha = (int)Math.Round(Math.Clamp(_windowOpacity, 0.1, 1.0) * 255);
+        return (byte)Math.Clamp(alpha, 1, 255);
+    }
+
+    private void SetDotSize(DotSizeOption dotSize)
+    {
+        if (_dotSize == dotSize)
+        {
+            return;
+        }
+
+        _dotSize = dotSize;
+        _settings.DotSize = dotSize;
+        SaveSettingsSafely();
+        UpdateMenuChecks();
+        RenderLayeredWindow();
+    }
+
+    private void SetDockPosition(DockPosition position)
+    {
+        if (_position == position)
+        {
+            return;
+        }
+
+        _position = position;
+        _settings.Position = position;
+        ApplyPlacement(position);
+        SaveSettingsSafely();
+        UpdateMenuChecks();
+        RenderLayeredWindow();
+    }
+
+    private void SetClickThrough(bool clickThrough)
+    {
+        if (_clickThrough == clickThrough)
+        {
+            UpdateMenuChecks();
+            return;
+        }
+
+        if (clickThrough)
+        {
+            CancelDrag();
+        }
+
+        _clickThrough = clickThrough;
+        _settings.ClickThrough = clickThrough;
+        ApplyClickThroughStyle();
+        SaveSettingsSafely();
+        UpdateMenuChecks();
+    }
+
+    private bool ApplyClickThroughStyle()
+    {
+        if (!IsHandleCreated || _resourcesDisposed)
+        {
+            return LogRenderFailure(
+                "Apply window styles",
+                0,
+                new InvalidOperationException(
+                    $"IsHandleCreated={IsHandleCreated}, ResourcesDisposed={_resourcesDisposed}."));
+        }
+
+        Marshal.SetLastPInvokeError(0);
+        IntPtr currentStyle = GetWindowLongPtrCompat(Handle, GwlExStyle);
+        int getStyleError = Marshal.GetLastWin32Error();
+        if (currentStyle == IntPtr.Zero && getStyleError != 0)
+        {
+            return LogRenderFailure("GetWindowLongPtr(GWL_EXSTYLE)", getStyleError);
+        }
+
+        long styleValue = currentStyle.ToInt64();
+        long mandatoryStyles = WsExToolWindow | WsExNoActivate | WsExLayered;
+        long updatedValue = _clickThrough
+            ? styleValue | mandatoryStyles | WsExTransparent
+            : (styleValue | mandatoryStyles) & ~WsExTransparent;
+
+        if (updatedValue != styleValue)
+        {
+            Marshal.SetLastPInvokeError(0);
+            IntPtr previousStyle = SetWindowLongPtrCompat(Handle, GwlExStyle, new IntPtr(updatedValue));
+            int setStyleError = Marshal.GetLastWin32Error();
+            if (previousStyle == IntPtr.Zero && setStyleError != 0)
+            {
+                return LogRenderFailure("SetWindowLongPtr(GWL_EXSTYLE)", setStyleError);
+            }
+        }
+
+        Marshal.SetLastPInvokeError(0);
+        if (!SetWindowPos(
+            Handle,
+            HwndTopMost,
+            0,
+            0,
+            0,
+            0,
+            SwpNoMove | SwpNoSize | SwpNoActivate | SwpFrameChanged))
+        {
+            return LogRenderFailure("SetWindowPos(apply layered styles)", Marshal.GetLastWin32Error());
+        }
+
+        Marshal.SetLastPInvokeError(0);
+        long appliedStyles = GetWindowLongPtrCompat(Handle, GwlExStyle).ToInt64();
+        int verifyStyleError = Marshal.GetLastWin32Error();
+        if (appliedStyles == 0 && verifyStyleError != 0)
+        {
+            return LogRenderFailure("GetWindowLongPtr(verify GWL_EXSTYLE)", verifyStyleError);
+        }
+
+        long expectedStyles = mandatoryStyles | (_clickThrough ? (long)WsExTransparent : 0L);
+        if ((appliedStyles & expectedStyles) != expectedStyles ||
+            (!_clickThrough && (appliedStyles & WsExTransparent) != 0))
+        {
+            return LogRenderFailure(
+                "Verify layered window styles",
+                0,
+                new InvalidOperationException(
+                    $"Applied style 0x{appliedStyles:X}, expected flags 0x{expectedStyles:X}."));
+        }
+
+        return true;
+    }
+
+    private void ApplyPlacement(DockPosition position)
+    {
+        Point targetLocation = position == DockPosition.Custom
+            ? GetCustomOrFallbackLocation()
+            : GetPresetLocation(position, GetPlacementScreen().WorkingArea);
+
+        Location = targetLocation;
+    }
+
+    private Point GetCustomOrFallbackLocation()
+    {
+        if (_settings.CustomX.HasValue && _settings.CustomY.HasValue)
+        {
+            Point desired = new(_settings.CustomX.Value, _settings.CustomY.Value);
+            if (TryClampVisibleLocation(desired, out Point customLocation))
+            {
+                return customLocation;
+            }
+        }
+
+        Screen primaryScreen = Screen.PrimaryScreen ?? Screen.FromPoint(Cursor.Position);
+        return GetPresetLocation(DockPosition.MiddleRight, primaryScreen.WorkingArea);
+    }
+
+    private bool TryClampVisibleLocation(Point desiredLocation, out Point clampedLocation)
+    {
+        Rectangle desiredBounds = new(desiredLocation, ClientSize);
+        Screen? bestScreen = null;
+        int bestIntersectionArea = 0;
+
+        foreach (Screen screen in Screen.AllScreens)
+        {
+            Rectangle intersection = Rectangle.Intersect(screen.WorkingArea, desiredBounds);
+            int intersectionArea = intersection.Width * intersection.Height;
+            if (intersectionArea > bestIntersectionArea)
+            {
+                bestIntersectionArea = intersectionArea;
+                bestScreen = screen;
+            }
+        }
+
+        if (bestScreen is null)
+        {
+            clampedLocation = Point.Empty;
+            return false;
+        }
+
+        clampedLocation = ClampLocationToWorkingArea(desiredLocation, bestScreen.WorkingArea);
+        return true;
+    }
+
+    private Point GetPresetLocation(DockPosition position, Rectangle area)
+    {
+        int x = area.Right - ClientSize.Width - PlacementMargin;
+        int y = area.Top + PlacementMargin;
+
+        switch (position)
+        {
+            case DockPosition.MiddleRight:
+                x = area.Right - ClientSize.Width - PlacementMargin;
+                y = area.Top + (area.Height - ClientSize.Height) / 2;
+                break;
+            case DockPosition.BottomRight:
+                x = area.Right - ClientSize.Width - PlacementMargin;
+                y = area.Bottom - ClientSize.Height - PlacementMargin;
+                break;
+            case DockPosition.BottomLeft:
+                x = area.Left + PlacementMargin;
+                y = area.Bottom - ClientSize.Height - PlacementMargin;
+                break;
+            case DockPosition.MiddleLeft:
+                x = area.Left + PlacementMargin;
+                y = area.Top + (area.Height - ClientSize.Height) / 2;
+                break;
+            case DockPosition.TopLeft:
+                x = area.Left + PlacementMargin;
+                y = area.Top + PlacementMargin;
+                break;
+        }
+
+        return ClampLocationToWorkingArea(new Point(x, y), area);
+    }
+
+    private Screen GetPlacementScreen()
+    {
+        if (!_placementInitialized)
+        {
+            return Screen.PrimaryScreen ?? Screen.FromPoint(Cursor.Position);
+        }
+
+        Point center = new(Location.X + ClientSize.Width / 2, Location.Y + ClientSize.Height / 2);
+        return Screen.FromPoint(center);
+    }
+
+    private Point ClampLocationToWorkingArea(Point location, Rectangle area)
+    {
+        int maxX = Math.Max(area.Left, area.Right - ClientSize.Width);
+        int maxY = Math.Max(area.Top, area.Bottom - ClientSize.Height);
+        int x = Math.Max(area.Left, Math.Min(location.X, maxX));
+        int y = Math.Max(area.Top, Math.Min(location.Y, maxY));
+        return new Point(x, y);
+    }
+
+    private int GetEffectiveDotDiameter()
+    {
+        int desired = _dotSize switch
+        {
+            DotSizeOption.Small => 18,
+            DotSizeOption.Medium => 26,
+            DotSizeOption.Large => 34,
+            _ => 26
+        };
+
+        int maxAllowed = Math.Max(6, Math.Min(ClientSize.Width, ClientSize.Height) - DotMargin);
+        int diameter = Math.Min(desired, maxAllowed);
+        return diameter % 2 == 0 ? diameter : Math.Max(6, diameter - 1);
+    }
+
+    private Color GetCurrentDotColor()
+    {
+        return _isActive ? ActiveDotColor : InactiveDotColor;
+    }
+
+    private void UpdateMenuChecks()
+    {
+        UpdateMenuChecks(_dotMenuItems);
+        UpdateMenuChecks(_trayMenuItems);
+    }
+
+    private void UpdateMenuChecks(MenuItemSet items)
+    {
+        items.ClickThroughItem.Checked = _clickThrough;
+
+        items.SmallSizeItem.Checked = _dotSize == DotSizeOption.Small;
+        items.MediumSizeItem.Checked = _dotSize == DotSizeOption.Medium;
+        items.LargeSizeItem.Checked = _dotSize == DotSizeOption.Large;
+
+        items.TopRightItem.Checked = _position == DockPosition.TopRight;
+        items.MiddleRightItem.Checked = _position == DockPosition.MiddleRight;
+        items.BottomRightItem.Checked = _position == DockPosition.BottomRight;
+        items.BottomLeftItem.Checked = _position == DockPosition.BottomLeft;
+        items.MiddleLeftItem.Checked = _position == DockPosition.MiddleLeft;
+        items.TopLeftItem.Checked = _position == DockPosition.TopLeft;
+    }
+
+    private void HandleMouseDown(object? sender, MouseEventArgs e)
+    {
+        if (_clickThrough || e.Button != MouseButtons.Left)
+        {
+            return;
+        }
+
+        _isDragging = true;
+        _dragMoved = false;
+        _dragStartCursor = Cursor.Position;
+        _dragStartLocation = Location;
+        Capture = true;
+    }
+
+    private void HandleMouseMove(object? sender, MouseEventArgs e)
+    {
+        if (!_isDragging)
+        {
+            return;
+        }
+
+        if (_clickThrough || (Control.MouseButtons & MouseButtons.Left) == 0)
+        {
+            CancelDrag();
+            return;
+        }
+
+        Point currentCursor = Cursor.Position;
+        int deltaX = currentCursor.X - _dragStartCursor.X;
+        int deltaY = currentCursor.Y - _dragStartCursor.Y;
+        Point proposedLocation = new(_dragStartLocation.X + deltaX, _dragStartLocation.Y + deltaY);
+        Point clampedLocation = ClampLocationToWorkingArea(
+            proposedLocation,
+            Screen.FromPoint(currentCursor).WorkingArea);
+
+        if (Location != clampedLocation)
+        {
+            Location = clampedLocation;
+            _dragMoved = true;
+        }
+    }
+
+    private void HandleMouseUp(object? sender, MouseEventArgs e)
+    {
+        if (!_clickThrough && e.Button == MouseButtons.Left)
+        {
+            FinishDrag(saveCustomLocation: true);
+            return;
+        }
+
+        if (!_clickThrough && e.Button == MouseButtons.Right)
+        {
+            _dotMenu.Show(PointToScreen(e.Location));
+        }
+    }
+
+    private void HandleMouseCaptureChanged(object? sender, EventArgs e)
+    {
+        if (_isDragging && !Capture)
+        {
+            CancelDrag();
+        }
+    }
+
+    private void FinishDrag(bool saveCustomLocation)
+    {
+        if (!_isDragging)
+        {
+            return;
+        }
+
+        bool shouldSaveCustomLocation = saveCustomLocation && _dragMoved;
+        _isDragging = false;
+        _dragMoved = false;
+        _dragStartCursor = Point.Empty;
+        _dragStartLocation = Point.Empty;
+
+        if (Capture)
+        {
+            Capture = false;
+        }
+
+        if (shouldSaveCustomLocation)
+        {
+            _position = DockPosition.Custom;
+            _settings.Position = DockPosition.Custom;
+            _settings.CustomX = Location.X;
+            _settings.CustomY = Location.Y;
+            SaveSettingsSafely();
+            UpdateMenuChecks();
+        }
+    }
+
+    private void CancelDrag()
+    {
+        if (!_isDragging)
+        {
+            return;
+        }
+
+        _isDragging = false;
+        _dragMoved = false;
+        _dragStartCursor = Point.Empty;
+        _dragStartLocation = Point.Empty;
+
+        if (Capture)
+        {
+            Capture = false;
+        }
+    }
+
+    private void SaveSettingsSafely()
+    {
+        try
+        {
+            _settings.Save();
+        }
+        catch (Exception ex)
+        {
+            LogDiagnostic("Save settings", 0, ex);
+        }
+    }
+
+    private void RequestShutdown()
+    {
+        if (_shuttingDown)
+        {
+            return;
+        }
+
+        _shuttingDown = true;
+        _trayIcon.Visible = false;
+        Close();
+    }
+
+    private void CleanupResources()
+    {
+        if (_resourcesDisposed)
+        {
+            return;
+        }
+
+        _resourcesDisposed = true;
+        CancelDrag();
+        _statusTimer.Stop();
+        _gameTimer?.Stop();
+
+        if (_hookHandle != IntPtr.Zero)
+        {
+            UnhookWindowsHookEx(_hookHandle);
+            _hookHandle = IntPtr.Zero;
+        }
+
+        _keyboardProc = null;
+        _trayIcon.Visible = false;
+        _trayIcon.ContextMenuStrip = null;
+        _trayIcon.Dispose();
+        _applicationIcon?.Dispose();
+        _dotMenu.Dispose();
+        _trayMenu.Dispose();
+        _statusTimer.Dispose();
+        _gameTimer?.Dispose();
+    }
+
+    private static IntPtr GetWindowLongPtrCompat(IntPtr hWnd, int nIndex)
+    {
+        return IntPtr.Size == 8
+            ? GetWindowLongPtr64(hWnd, nIndex)
+            : new IntPtr(GetWindowLong32(hWnd, nIndex));
+    }
+
+    private static IntPtr SetWindowLongPtrCompat(IntPtr hWnd, int nIndex, IntPtr dwNewLong)
+    {
+        return IntPtr.Size == 8
+            ? SetWindowLongPtr64(hWnd, nIndex, dwNewLong)
+            : new IntPtr(SetWindowLong32(hWnd, nIndex, dwNewLong.ToInt32()));
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelKeyboardProc lpfn, IntPtr hMod, uint dwThreadId);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr GetModuleHandle(string? lpModuleName);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr GetDC(IntPtr hWnd);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern IntPtr CreateDIBSection(
+        IntPtr hdc,
+        ref BitmapInfo pbmi,
+        uint usage,
+        out IntPtr bits,
+        IntPtr section,
+        uint offset);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool DeleteDC(IntPtr hdc);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern IntPtr SelectObject(IntPtr hdc, IntPtr hObject);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    private static extern bool DeleteObject(IntPtr hObject);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool UpdateLayeredWindow(
+        IntPtr hwnd,
+        IntPtr hdcDst,
+        ref PointStruct pptDst,
+        ref SizeStruct psize,
+        IntPtr hdcSrc,
+        ref PointStruct pptSrc,
+        uint crKey,
+        ref BlendFunction pblend,
+        uint dwFlags);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLong", SetLastError = true)]
+    private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowLongPtr", SetLastError = true)]
+    private static extern IntPtr GetWindowLongPtr64(IntPtr hWnd, int nIndex);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLong", SetLastError = true)]
+    private static extern int SetWindowLong32(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    [DllImport("user32.dll", EntryPoint = "SetWindowLongPtr", SetLastError = true)]
+    private static extern IntPtr SetWindowLongPtr64(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SetWindowPos(
+        IntPtr hWnd,
+        IntPtr hWndInsertAfter,
+        int x,
+        int y,
+        int cx,
+        int cy,
+        uint uFlags);
+
+    private delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+    private sealed record MenuItemSet(
+        ToolStripMenuItem ClickThroughItem,
+        ToolStripMenuItem GameDirectoryItem,
+        ToolStripMenuItem SmallSizeItem,
+        ToolStripMenuItem MediumSizeItem,
+        ToolStripMenuItem LargeSizeItem,
+        ToolStripMenuItem TopRightItem,
+        ToolStripMenuItem MiddleRightItem,
+        ToolStripMenuItem BottomRightItem,
+        ToolStripMenuItem BottomLeftItem,
+        ToolStripMenuItem MiddleLeftItem,
+        ToolStripMenuItem TopLeftItem);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BitmapInfoHeader
+    {
+        public uint Size;
+        public int Width;
+        public int Height;
+        public ushort Planes;
+        public ushort BitCount;
+        public uint Compression;
+        public uint SizeImage;
+        public int XPelsPerMeter;
+        public int YPelsPerMeter;
+        public uint ColorsUsed;
+        public uint ColorsImportant;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct BitmapInfo
+    {
+        public BitmapInfoHeader Header;
+        public uint Colors;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PointStruct
+    {
+        public int X;
+        public int Y;
+
+        public PointStruct(int x, int y)
+        {
+            X = x;
+            Y = y;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SizeStruct
+    {
+        public int Width;
+        public int Height;
+
+        public SizeStruct(int width, int height)
+        {
+            Width = width;
+            Height = height;
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
+    private struct BlendFunction
+    {
+        public byte BlendOp;
+        public byte BlendFlags;
+        public byte SourceConstantAlpha;
+        public byte AlphaFormat;
+    }
+}
