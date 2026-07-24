@@ -3,6 +3,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Windows.Forms;
@@ -92,7 +93,7 @@ internal sealed class MonitorSettings
         }
 
         string json = JsonSerializer.Serialize(dto, JsonOptions);
-        File.WriteAllText(configPath, json);
+        File.WriteAllText(configPath, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
     }
 
     private static string GetConfigPath()
@@ -232,6 +233,7 @@ internal sealed class MainForm : Form
     private readonly MenuItemSet _dotMenuItems;
     private readonly MenuItemSet _trayMenuItems;
     private readonly bool _followGame;
+    private readonly bool _launchGame;
     private readonly long _gameStartTick;
 
     private LowLevelKeyboardProc? _keyboardProc;
@@ -259,9 +261,10 @@ internal sealed class MainForm : Form
     private Point _dragStartCursor;
     private Point _dragStartLocation;
 
-    public MainForm(bool followGame)
+    public MainForm(bool followGame, bool launchGame)
     {
         _followGame = followGame;
+        _launchGame = launchGame;
         _gameStartTick = Environment.TickCount64;
         _settings = MonitorSettings.Load();
         _windowSize = _settings.WindowSize;
@@ -271,7 +274,7 @@ internal sealed class MainForm : Form
         _position = _settings.Position;
         _clickThrough = _settings.ClickThrough;
 
-        Text = "E Key Monitor";
+        Text = "E键监控工具";
         AutoScaleMode = AutoScaleMode.None;
         StartPosition = FormStartPosition.Manual;
         FormBorderStyle = FormBorderStyle.None;
@@ -302,7 +305,7 @@ internal sealed class MainForm : Form
         {
             Icon = _applicationIcon ?? SystemIcons.Application,
             Visible = true,
-            Text = "E Key Monitor",
+            Text = "E键监控工具",
             ContextMenuStrip = _trayMenu
         };
 
@@ -353,6 +356,12 @@ internal sealed class MainForm : Form
                 return;
             }
 
+            if (_launchGame && !StartConfiguredGameLauncher())
+            {
+                RequestShutdown();
+                return;
+            }
+
             InstallKeyboardHook();
         }
         catch (Exception ex)
@@ -360,7 +369,7 @@ internal sealed class MainForm : Form
             MessageBox.Show(
                 this,
                 $"无法安装全局 E 键监听。\n\n错误信息：{ex.Message}\n\n程序将安全退出。",
-                "E Key Monitor",
+                "E键监控工具",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
             BeginInvoke(RequestShutdown);
@@ -394,7 +403,8 @@ internal sealed class MainForm : Form
     private ContextMenuStrip BuildSettingsMenu(out MenuItemSet items)
     {
         ContextMenuStrip menu = new();
-        ToolStripMenuItem gameDirectoryItem = new("Set game directory...", null, (_, _) => SelectGameDirectory());
+        ToolStripMenuItem gameDirectoryItem = new("设置游戏目录...", null, (_, _) => SelectGameDirectory());
+        ToolStripMenuItem createShortcutsItem = new("生成桌面快捷方式", null, (_, _) => CreateDesktopShortcuts());
 
         ToolStripMenuItem clickThroughItem = new("鼠标穿透", null, (_, _) => SetClickThrough(!_clickThrough));
 
@@ -430,6 +440,7 @@ internal sealed class MainForm : Form
 
         menu.Items.Add(clickThroughItem);
         menu.Items.Add(gameDirectoryItem);
+        menu.Items.Add(createShortcutsItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(sizeMenu);
         menu.Items.Add(positionMenu);
@@ -465,7 +476,7 @@ internal sealed class MainForm : Form
         {
             using FolderBrowserDialog dialog = new()
             {
-                Description = "Select the folder containing StartGame.exe and NarakaBladepoint.exe.",
+                Description = "请选择同时包含 StartGame.exe 和 NarakaBladepoint.exe 的游戏目录。",
                 ShowNewFolderButton = false,
                 SelectedPath = Directory.Exists(_settings.GameDirectory) ? _settings.GameDirectory : string.Empty
             };
@@ -477,7 +488,7 @@ internal sealed class MainForm : Form
 
             if (!TryNormalizeAndValidateDirectory(dialog.SelectedPath, out normalizedDirectory, out string error))
             {
-                MessageBox.Show(this, error, "E Key Monitor", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, error, "E键监控工具", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 continue;
             }
 
@@ -492,7 +503,7 @@ internal sealed class MainForm : Form
             {
                 _settings.GameDirectory = previousDirectory;
                 LogDiagnostic("Save game directory", 0, ex);
-                MessageBox.Show(this, $"The game directory could not be saved. The previous setting was kept.\n\n{ex.Message}", "E Key Monitor", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, $"游戏目录保存失败，已保留之前的设置。\n\n{ex.Message}", "E键监控工具", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 continue;
             }
         }
@@ -505,7 +516,7 @@ internal sealed class MainForm : Form
         string? previousDirectory = _settings.GameDirectory;
         using FolderBrowserDialog dialog = new()
         {
-            Description = "Select the folder containing StartGame.exe and NarakaBladepoint.exe.",
+            Description = "请选择同时包含 StartGame.exe 和 NarakaBladepoint.exe 的游戏目录。",
             ShowNewFolderButton = false,
             SelectedPath = Directory.Exists(previousDirectory) ? previousDirectory : string.Empty
         };
@@ -517,7 +528,7 @@ internal sealed class MainForm : Form
 
         if (!TryNormalizeAndValidateDirectory(dialog.SelectedPath, out string? normalizedDirectory, out string error))
         {
-            MessageBox.Show(this, error, "E Key Monitor", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            MessageBox.Show(this, error, "E键监控工具", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return;
         }
 
@@ -530,14 +541,167 @@ internal sealed class MainForm : Form
         {
             _settings.GameDirectory = previousDirectory;
             LogDiagnostic("Save game directory", 0, ex);
-            MessageBox.Show(this, $"The game directory could not be saved. The previous setting was kept.\n\n{ex.Message}", "E Key Monitor", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            MessageBox.Show(this, $"游戏目录保存失败，已保留之前的设置。\n\n{ex.Message}", "E键监控工具", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        }
+    }
+
+    private bool StartConfiguredGameLauncher()
+    {
+        if (string.IsNullOrWhiteSpace(_settings.GameDirectory))
+        {
+            MessageBox.Show(
+                this,
+                "尚未设置游戏目录，请先选择游戏目录。",
+                "E键监控工具",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Warning);
+            return false;
+        }
+
+        string launcherPath = Path.Combine(_settings.GameDirectory, "StartGame.exe");
+        if (!IsRegularFile(launcherPath))
+        {
+            MessageBox.Show(
+                this,
+                $"找不到游戏启动器：\n{launcherPath}",
+                "E键监控工具",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            return false;
+        }
+
+        try
+        {
+            ProcessStartInfo startInfo = new()
+            {
+                FileName = launcherPath,
+                WorkingDirectory = _settings.GameDirectory,
+                UseShellExecute = true
+            };
+
+            Process? launcherProcess = Process.Start(startInfo);
+            if (launcherProcess is null)
+            {
+                throw new InvalidOperationException("Windows 没有返回启动器进程。");
+            }
+
+            launcherProcess.Dispose();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            LogDiagnostic("启动游戏启动器", 0, ex);
+            MessageBox.Show(
+                this,
+                $"启动游戏启动器失败。\n\n{ex.Message}",
+                "E键监控工具",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+            return false;
+        }
+    }
+
+    private void CreateDesktopShortcuts()
+    {
+        try
+        {
+            string desktopDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            if (string.IsNullOrWhiteSpace(desktopDirectory))
+            {
+                throw new InvalidOperationException("无法确定当前用户的桌面路径。");
+            }
+
+            string executablePath = Path.Combine(AppContext.BaseDirectory, "E_Key_Monitor.exe");
+            if (!IsRegularFile(executablePath))
+            {
+                throw new FileNotFoundException("找不到当前监控工具 EXE。", executablePath);
+            }
+
+            Type shellType = Type.GetTypeFromProgID("WScript.Shell")
+                ?? throw new InvalidOperationException("系统不支持创建 Windows 快捷方式。");
+            object shellObject = Activator.CreateInstance(shellType)
+                ?? throw new InvalidOperationException("无法创建 Windows 快捷方式组件。");
+
+            try
+            {
+                dynamic shell = shellObject;
+                string workingDirectory = Path.GetDirectoryName(executablePath) ?? AppContext.BaseDirectory;
+                SaveShortcut(
+                    shell,
+                    Path.Combine(desktopDirectory, "E键监控工具.lnk"),
+                    executablePath,
+                    string.Empty,
+                    workingDirectory,
+                    "E键监控工具");
+                SaveShortcut(
+                    shell,
+                    Path.Combine(desktopDirectory, "启动StartGame和监控.lnk"),
+                    executablePath,
+                    "--launch-game",
+                    workingDirectory,
+                    "启动 StartGame 和 E 键监控工具");
+            }
+            finally
+            {
+                ReleaseComObject(shellObject);
+            }
+
+            MessageBox.Show(
+                this,
+                "已在桌面生成两个快捷方式：\n\nE键监控工具\n启动StartGame和监控",
+                "E键监控工具",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+        }
+        catch (Exception ex)
+        {
+            LogDiagnostic("生成桌面快捷方式", 0, ex);
+            MessageBox.Show(
+                this,
+                $"生成桌面快捷方式失败。\n\n{ex.Message}",
+                "E键监控工具",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+    }
+
+    private static void SaveShortcut(
+        dynamic shell,
+        string shortcutPath,
+        string executablePath,
+        string arguments,
+        string workingDirectory,
+        string description)
+    {
+        object shortcutObject = shell.CreateShortcut(shortcutPath);
+        try
+        {
+            dynamic shortcut = shortcutObject;
+            shortcut.TargetPath = executablePath;
+            shortcut.Arguments = arguments;
+            shortcut.WorkingDirectory = workingDirectory;
+            shortcut.IconLocation = $"{executablePath},0";
+            shortcut.Description = description;
+            shortcut.Save();
+        }
+        finally
+        {
+            ReleaseComObject(shortcutObject);
+        }
+    }
+
+    private static void ReleaseComObject(object value)
+    {
+        if (Marshal.IsComObject(value))
+        {
+            Marshal.FinalReleaseComObject(value);
         }
     }
 
     private static bool TryNormalizeAndValidateDirectory(string? directoryPath, out string? normalizedDirectory, out string error)
     {
         normalizedDirectory = null;
-        error = "Select a folder containing both StartGame.exe and NarakaBladepoint.exe.";
+        error = "请选择同时包含 StartGame.exe 和 NarakaBladepoint.exe 的游戏目录。";
 
         if (string.IsNullOrWhiteSpace(directoryPath))
         {
@@ -549,7 +713,7 @@ internal sealed class MainForm : Form
             normalizedDirectory = Path.GetFullPath(directoryPath.Trim());
             if (!Directory.Exists(normalizedDirectory))
             {
-                error = "The selected path is not an existing folder.";
+                error = "选择的路径不是现有文件夹。";
                 normalizedDirectory = null;
                 return false;
             }
@@ -557,7 +721,7 @@ internal sealed class MainForm : Form
             if (!IsRegularFile(Path.Combine(normalizedDirectory, "StartGame.exe")) ||
                 !IsRegularFile(Path.Combine(normalizedDirectory, "NarakaBladepoint.exe")))
             {
-                error = "The selected folder must contain regular files named StartGame.exe and NarakaBladepoint.exe.";
+                error = "选择的文件夹必须包含 StartGame.exe 和 NarakaBladepoint.exe 文件。";
                 normalizedDirectory = null;
                 return false;
             }
@@ -566,7 +730,7 @@ internal sealed class MainForm : Form
         }
         catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
         {
-            error = $"The selected path is invalid.\n\n{ex.Message}";
+            error = $"选择的路径无效。\n\n{ex.Message}";
             return false;
         }
     }
@@ -1015,7 +1179,7 @@ internal sealed class MainForm : Form
         MessageBox.Show(
             this,
             $"状态圆点首次绘制失败。\n\n诊断信息：\n{logLocation}\n\n程序将安全退出。",
-            "E Key Monitor",
+            "E键监控工具",
             MessageBoxButtons.OK,
             MessageBoxIcon.Error);
         RequestShutdown();
@@ -1094,7 +1258,7 @@ internal sealed class MainForm : Form
         {
             _trayIcon.ShowBalloonTip(
                 5000,
-                "E Key Monitor",
+                "E键监控工具",
                 "等待 NarakaBladepoint 启动超过 10 分钟，工具将退出。",
                 ToolTipIcon.Info);
         }

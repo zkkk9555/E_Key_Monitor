@@ -16,8 +16,12 @@ function Test-IsWithin([string] $Path, [string] $Parent) {
 
 $sourceDirectory = Get-FullPath $PSScriptRoot
 $sourceProject = Join-Path $sourceDirectory 'E_Key_Monitor.csproj'
+$userGuide = Join-Path $sourceDirectory 'E键监控工具中文使用说明书.md'
 if (-not (Test-Path -LiteralPath $sourceProject -PathType Leaf)) {
     throw "Project file not found: $sourceProject"
+}
+if (-not (Test-Path -LiteralPath $userGuide -PathType Leaf)) {
+    throw "User guide not found: $userGuide"
 }
 
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
@@ -108,13 +112,23 @@ try {
     New-Item -ItemType Directory -Path $outputDirectory -Force | Out-Null
     Copy-Item -LiteralPath $publishedExe -Destination (Join-Path $outputDirectory 'E_Key_Monitor.exe')
     Copy-Item -LiteralPath $publishedConfig -Destination (Join-Path $outputDirectory 'config.json')
+    Copy-Item -LiteralPath $userGuide -Destination (Join-Path $outputDirectory 'E键监控工具中文使用说明书.md')
+
+    $packageFiles = @(Get-ChildItem -LiteralPath $outputDirectory -File)
+    $expectedPackageNames = @('E_Key_Monitor.exe', 'config.json', 'E键监控工具中文使用说明书.md')
+    $unexpectedPackageFiles = @($packageFiles | Where-Object { $_.Name -notin $expectedPackageNames })
+    if ($unexpectedPackageFiles.Count -gt 0 -or $packageFiles.Count -ne $expectedPackageNames.Count) {
+        $names = ($packageFiles | ForEach-Object Name) -join ', '
+        throw "Portable package contract failed. Expected E_Key_Monitor.exe, config.json, and the Chinese user guide; found: $names"
+    }
+
     $packageConfig = Join-Path $outputDirectory 'config.json'
     $configItem = Get-Item -LiteralPath $packageConfig
     $configItem.IsReadOnly = $false
     $writeTest = [IO.File]::Open($packageConfig, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::Read)
     $writeTest.Dispose()
 
-    Compress-Archive -LiteralPath (Join-Path $outputDirectory 'E_Key_Monitor.exe'), $packageConfig -DestinationPath $zipPath -CompressionLevel Optimal
+    Compress-Archive -LiteralPath @($packageFiles | ForEach-Object FullName) -DestinationPath $zipPath -CompressionLevel Optimal
     $exeHash = (Get-FileHash -LiteralPath (Join-Path $outputDirectory 'E_Key_Monitor.exe') -Algorithm SHA256).Hash
     $zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash
     Write-Output "Portable directory: $outputDirectory"

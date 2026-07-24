@@ -8,7 +8,7 @@
 - 不要把其他位置的 `E_Key_Monitor` 副本当作源码。
 - E 盘上的项目副本是用户保留的备份，不要读取、修改、构建、同步或覆盖它。
 - E 盘同时包含真实游戏安装目录；只有下文明确列出的游戏路径属于正常配置。
-- 当前项目目录中虽然有 `.git` 文件夹，但它是空目录，项目目前不是可用的 Git 仓库。
+- 当前项目目录是可用的 Git 工作树；当前分支和提交信息必须以实际 `git status`、分支和日志命令为准。不要覆盖或清理现有未提交修改。
 - `bin/`、`obj/`、`.appdata/`、`.dotnet-home/` 和 `.nuget/` 是构建或工具生成内容，不是源代码。
 
 ## 项目用途
@@ -57,12 +57,18 @@
 
 ```text
 E_Key_Monitor/
+├── .gitignore                            # 构建产物、本地状态和敏感文件排除规则
 ├── E_Key_Monitor.csproj                  # .NET 8 WinForms 项目定义
 ├── E_Key_Monitor.ico                     # EXE、托盘和独立快捷方式的多尺寸图标
 ├── E_Key_Monitor-icon.png                # 图标设计预览
 ├── Program.cs                            # 解析 --follow-game 并启动 MainForm
-├── MainForm.cs                           # 配置、Hook、绘制、托盘、拖动、游戏跟随和清理
+├── MainForm.cs                           # 配置、Hook、绘制、托盘、拖动、联合启动、快捷方式、游戏跟随和清理
 ├── config.json                           # 默认配置模板
+├── 启动E键监控工具.bat                    # 中文独立监控入口，调用正式 PS1
+├── 启动永劫无间E键提示.bat                # 中文正式联合启动入口
+├── 开发启动永劫无间E键提示.bat            # 中文开发联合启动入口
+├── 生成中文桌面入口.bat                   # 中文桌面快捷方式生成入口
+├── 制作便携版监控工具.bat                 # 中文便携版打包入口
 ├── Package_E_Key_Monitor.ps1              # 生成便携版单文件包
 ├── Start_E_Key_Monitor.ps1               # 独立启动正式监控工具
 ├── Start_Naraka_With_Monitor.bat         # 正式启动的 ASCII 包装器
@@ -71,11 +77,23 @@ E_Key_Monitor/
 ├── Start_Naraka_With_Monitor_Dev.ps1     # dotnet run 联合启动逻辑
 ├── Create_Naraka_Monitor_Shortcut.bat    # 两个桌面快捷方式的创建入口
 ├── Create_Naraka_Monitor_Shortcut.ps1    # 创建独立监控与游戏联合启动快捷方式
+├── E键监控工具中文使用说明书.md           # 面向用户的中文入口说明书
+├── docs/superpowers/                     # 计划和设计记录
 ├── README.md                             # 面向用户的使用说明
 └── AGENTS.md                             # 面向 AI 和维护者的当前项目说明
 ```
 
 `.lnk` 是生成产物，包含绝对路径，不能作为可移植源码或路径事实。当前源码目录没有 `.lnk` 文件；项目移动后应重新生成快捷方式。
+
+最终便携包只包含：
+
+```text
+E_Key_Monitor.exe
+config.json
+E键监控工具中文使用说明书.md
+```
+
+根目录的 BAT、PS1 和开发记录是源码维护文件，不进入最终便携包，也不是普通用户的日常入口。
 
 ## 应用图标
 
@@ -85,7 +103,7 @@ E_Key_Monitor/
 - `MainForm` 从当前可执行文件提取图标供 `NotifyIcon` 使用，失败时才回退到系统默认图标。
 - 提取出的 `Icon` 由 `CleanupResources` 释放。
 - `E键监控工具` 快捷方式使用监控 EXE 的新图标。
-- `永劫无间（E键提示）` 联合快捷方式继续使用原始 `StartGame.exe` 图标，便于识别游戏入口。
+- `启动StartGame和监控` 联合快捷方式使用当前监控 EXE 图标，便于保证便携包移动后仍可直接使用。
 - `E_Key_Monitor-icon.png` 仅作为文档和设计预览，不参与运行。
 
 ## 程序入口和运行模式
@@ -94,8 +112,9 @@ E_Key_Monitor/
 
 - 不带参数：普通独立模式。
 - 带 `--follow-game`：游戏跟随模式。
+- 带 `--launch-game`：游戏跟随模式，并在目录验证后启动原始 `StartGame.exe`。
 
-两种模式都会创建同一个 `MainForm`。普通模式不观察游戏进程，也不会因游戏退出自动关闭，但当前实现仍会在启动时校验 `gameDirectory`；配置缺失或无效时会弹出目录选择框，取消选择会退出。目录有效后，即使游戏进程不存在也可以运行，需要用户从托盘菜单退出。游戏跟随模式会等待游戏进程并在游戏结束后自动退出。
+所有模式都会创建同一个 `MainForm`。普通模式不观察游戏进程，也不会因游戏退出自动关闭，但启动时会校验 `gameDirectory`；配置缺失或无效时会显示中文目录选择框，取消选择会退出。目录有效后，即使游戏进程不存在也可以运行，需要用户从托盘菜单退出。`--follow-game` 只等待和跟随游戏进程；`--launch-game` 还会以验证目录为工作目录启动原始 `StartGame.exe`。
 
 ## 全局 E 键监听
 
@@ -167,6 +186,8 @@ AppContext.BaseDirectory\config.json
 
 也就是当前正在运行的 EXE 或 DLL 旁边的配置，而不一定是项目根目录的文件。
 
+当前配置包含中文游戏路径，根目录模板及构建输出应保持 UTF-8 with BOM，以兼容 Windows PowerShell 5.1 的默认读取行为。
+
 当前字段：
 
 ```json
@@ -187,7 +208,7 @@ AppContext.BaseDirectory\config.json
 说明：
 
 - `key` 当前保留为未来扩展，实际 Hook 仍固定监听 `E`。
-- `gameDirectory` 保存经验证的游戏目录绝对路径；根目录模板默认是 `null`，所有启动模式当前都会先要求它有效。
+- `gameDirectory` 保存经验证的游戏目录绝对路径；根目录模板默认是 `null`，首次启动选择成功后保存，路径失效时重新选择。
 - 无配置、JSON 损坏或字段无效时回退到安全默认值。
 - 保存配置失败只能记录诊断，不能让程序崩溃。
 
@@ -222,47 +243,52 @@ NarakaBladepoint
 进程名：  NarakaBladepoint
 ```
 
-联合启动前，正在使用的监控 EXE 旁边的 `config.json` 必须已经保存该游戏目录或其他同时包含两个游戏 EXE 的有效目录。监控工具菜单中的“Set game directory...”负责选择和验证目录；脚本本身只读取并校验配置，不从根目录模板推断路径。
+联合启动前，正在使用的监控 EXE 旁边的 `config.json` 必须保存一个同时包含两个游戏 EXE 的有效目录。监控工具菜单中的“设置游戏目录...”负责选择、验证和保存目录；默认配置为空，路径失效时下次启动会再次要求选择。
 
 正式联合启动流程：
 
-1. `Start_Naraka_With_Monitor.bat` 调用同目录 PS1。
-2. PS1 优先选择 `bin\Release\net8.0-windows\win-x64\publish\E_Key_Monitor.exe`。
-3. publish EXE 不存在时，回退到 `bin\Release\net8.0-windows\win-x64\E_Key_Monitor.exe`。
-4. 读取并验证监控 EXE 旁边的 `config.json`、游戏目录和两个游戏文件。
-5. 启动监控工具并传入 `--follow-game`。
-6. 再启动原始 `StartGame.exe`，工作目录为游戏目录。
-7. 不直接启动 `NarakaBladepoint.exe`。
-8. PS1 启动完成后退出；游戏结束后的清理由监控工具负责。
+1. 桌面快捷方式直接启动当前 `E_Key_Monitor.exe --launch-game`。
+2. EXE 验证旁边的 `config.json`、游戏目录和两个游戏文件。
+3. EXE 以游戏目录为工作目录启动原始 `StartGame.exe`。
+4. EXE 同时启用 `NarakaBladepoint` 游戏跟随模式。
+5. 不直接启动 `NarakaBladepoint.exe`。
+6. 游戏结束后的清理由监控工具负责。
 
-Windows 不会因为用户直接双击原始 `StartGame.exe` 而自动启动监控工具。用户必须使用联合启动 BAT 或由快捷方式生成脚本创建的新桌面入口。
+Windows 不会因为用户直接双击原始 `StartGame.exe` 而自动启动监控工具。用户应使用程序生成的“启动StartGame和监控”快捷方式。
+
+源码目录还保留以下脚本作为开发和兼容入口；它们不属于最终便携包，也不是普通用户的日常入口：
+
+- 旧中文 BAT 和英文 PS1：保留用于维护，不参与便携包运行。
+- `E_Key_Monitor.exe`：最终便携包中的唯一业务 EXE。
 
 ## 桌面快捷方式
 
-`Create_Naraka_Monitor_Shortcut.ps1` 一次创建或覆盖两个当前用户桌面快捷方式：
+运行中的 `E_Key_Monitor.exe` 通过托盘菜单“生成桌面快捷方式”创建或覆盖两个当前用户桌面快捷方式：
 
 ```text
 E键监控工具
-永劫无间（E键提示）
+启动StartGame和监控
 ```
 
-- `E键监控工具` 指向 Windows PowerShell，并调用当前项目的 `Start_E_Key_Monitor.ps1`。该脚本优先启动正式 publish EXE，publish 不存在时使用正式 win-x64 运行目录中的 EXE；它不启动游戏，也不带 `--follow-game`。
-- `永劫无间（E键提示）` 指向 Windows PowerShell，并调用当前项目的 `Start_Naraka_With_Monitor.ps1`。它会启动监控工具和原始 `StartGame.exe`。
-- 独立监控快捷方式使用监控 EXE 自身图标，联合启动快捷方式使用 `StartGame.exe` 图标。
-- 快捷方式的目标、参数和工作目录都必须根据 `$PSScriptRoot` 和当前桌面动态生成，不能硬编码旧用户目录。
-- 双击 BAT 时脚本会等待用户确认，便于查看生成结果。
-- 自动化验证可以传入 `-NoPause`，但 BAT 的普通用户行为保持不变。
-- 本次核查确认当前用户桌面的两个快捷方式仍指向旧的 `C:\Users\24310\Projects\E_Key_Monitor`；源码目录内没有 `.lnk` 文件，需重新运行创建脚本后才能作为当前入口使用。
+- `E键监控工具` 直接指向当前 EXE，不带参数。
+- `启动StartGame和监控` 直接指向当前 EXE，参数为 `--launch-game`。
+- 两个快捷方式都使用当前 EXE 图标，工作目录为 EXE 所在目录。
+- 便携文件夹移动后，必须从当前 EXE 的托盘菜单重新生成快捷方式。
 
 ## 脚本编码规则
 
-三个 BAT 必须始终保持纯 ASCII：
+根目录全部 8 个 BAT 必须始终保持纯 ASCII：
 
 - `Start_Naraka_With_Monitor.bat`
 - `Start_Naraka_With_Monitor_Dev.bat`
 - `Create_Naraka_Monitor_Shortcut.bat`
+- `启动E键监控工具.bat`
+- `启动永劫无间E键提示.bat`
+- `开发启动永劫无间E键提示.bat`
+- `生成中文桌面入口.bat`
+- `制作便携版监控工具.bat`
 
-BAT 只负责调用同目录 PS1，不要加入中文路径、`chcp`、复杂条件或实际启动逻辑。
+BAT 只负责调用同目录 PS1，不属于最终便携包；不要把 BAT 当作用户桌面入口。
 
 当前根目录共有 5 个 PS1。以下启动和快捷方式脚本包含中文路径或中文错误信息，必须始终保存为 UTF-8 with BOM，文件头为 `EF BB BF`；打包脚本当前也保持相同编码：
 
@@ -282,32 +308,39 @@ BAT 只负责调用同目录 PS1，不要加入中文路径、`chcp`、复杂条
 dotnet build -c Release
 dotnet run
 dotnet run -- --follow-game
+dotnet run -- --launch-game
 dotnet publish -c Release -r win-x64 --self-contained true
+.\Package_E_Key_Monitor.ps1
 ```
 
 常规自动检查可以执行 Release 构建。除非用户明确要求实际联调，否则不要自动启动游戏、BAT、PS1 或桌面快捷方式创建脚本。
 
 不要直接编辑 `bin/` 或 `obj/`。源代码修改后由 `dotnet build` 或 `dotnet publish` 重新生成输出。
 
-## 当前核查状态（2026-07-20）
+## 当前核查状态（2026-07-24）
 
 - VERIFIED：Windows x64 环境安装 .NET SDK `8.0.422`。
 - VERIFIED：`dotnet build -c Release --no-restore` 退出码为 0，0 个警告、0 个错误。
+- VERIFIED：`dotnet publish -c Release -r win-x64 --self-contained true --no-restore` 退出码为 0；最终便携目录和 ZIP 已在 `C:\tmp` 生成。
 - VERIFIED：`dotnet format E_Key_Monitor.csproj --verify-no-changes --no-restore` 退出码为 0。
-- VERIFIED：5 个根目录 PS1 均为 UTF-8 with BOM，PowerShell 5.1 静态语法解析无错误；3 个 BAT 均为纯 ASCII；根目录 `config.json` 可解析；安全边界静态搜索未发现输入注入、鼠标 Hook、进程注入或直接启动/终止游戏的命中。
+- VERIFIED：5 个根目录 PS1 均为 UTF-8 with BOM，PowerShell 5.1 静态语法解析无错误；8 个 BAT 均为纯 ASCII；根目录 `config.json` 可解析且 `gameDirectory` 默认为空；安全边界静态搜索未发现输入注入、鼠标 Hook、进程注入或直接启动/终止游戏的命中。
 - PARTIAL：`dotnet test -c Release --no-restore --verbosity normal` 退出码为 0，但项目没有测试项目或测试用例，因此不能据此声称有自动化测试通过。
 - VERIFIED：当前验证环境中的 `StartGame.exe`、`NarakaBladepoint.exe` 均存在，核查时 `NarakaBladepoint` 进程未运行。
 - PARTIAL：已配置运行目录中的监控 EXE 能启动并保持响应，`--follow-game` 在没有游戏进程时能保持等待；通过外部关闭窗口请求后，进程在 30 秒内未退出，本次测试进程需要强制清理。根因未定位，托盘菜单“退出”路径未单独验证。
 - STALE：当前桌面两个快捷方式仍指向 `C:\Users\24310\Projects\E_Key_Monitor`，不是本源码目录；项目目录内没有可用 `.lnk` 文件。需要重新运行创建脚本。
-- UNKNOWN：本次没有模拟 `E` 输入、验证圆点颜色切换、启动游戏、验证游戏退出后的 5 秒跟随清理、执行联合启动脚本、执行快捷方式创建脚本或执行便携打包脚本。
+- VERIFIED：便携打包验证通过，目录和 ZIP 内只包含一个 EXE、`config.json` 和中文说明书；没有 BAT 或 PS1。
+- UNKNOWN：本次没有模拟 `E` 输入、验证圆点颜色切换、实际启动游戏、验证游戏退出后的 5 秒跟随清理、从托盘创建桌面快捷方式或实际双击便携包 EXE。
+- VERIFIED：本次修改集中在 `Program.cs`、`MainForm.cs`、配置、打包脚本和文档；没有修改测试、依赖或锁文件。
 
-项目移动到当前 C 盘路径后，应重新运行：
+当前 Git 工作树核查到分支为 `main`，最近提交为 `838e43e Initial commit`；本次保留所有未提交修改，没有执行提交、重置、切换或清理。
+
+便携文件夹移动后，应启动当前 EXE，在托盘菜单选择“生成桌面快捷方式”：
 
 ```powershell
-.\Create_Naraka_Monitor_Shortcut.bat
+E_Key_Monitor.exe
 ```
 
-由脚本生成指向当前项目路径的两个新桌面快捷方式。不要手工修补或信任旧 `.lnk` 的绝对路径。
+由程序生成指向当前便携文件夹的两个新桌面快捷方式。不要手工修补旧 `.lnk` 的绝对路径。
 
 ## 修改原则
 

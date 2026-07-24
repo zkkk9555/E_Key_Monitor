@@ -13,6 +13,8 @@ $ProjectRoot = [System.IO.Path]::GetFullPath($ProjectRoot)
 
 $StandaloneLaunchScript = Join-Path $ProjectRoot 'Start_E_Key_Monitor.ps1'
 $LaunchScript = Join-Path $ProjectRoot 'Start_Naraka_With_Monitor.ps1'
+$StandaloneLaunchEntry = Join-Path $ProjectRoot '启动E键监控工具.bat'
+$LaunchEntry = Join-Path $ProjectRoot '启动永劫无间E键提示.bat'
 $PublishMonitor = Join-Path $ProjectRoot 'bin\Release\net8.0-windows\win-x64\publish\E_Key_Monitor.exe'
 $RuntimeMonitor = Join-Path $ProjectRoot 'bin\Release\net8.0-windows\win-x64\E_Key_Monitor.exe'
 
@@ -90,6 +92,14 @@ try {
         Exit-WithError "找不到正式联合启动脚本：$LaunchScript"
     }
 
+    if (-not (Test-Path -LiteralPath $StandaloneLaunchEntry -PathType Leaf)) {
+        Exit-WithError "找不到中文监控工具入口：$StandaloneLaunchEntry"
+    }
+
+    if (-not (Test-Path -LiteralPath $LaunchEntry -PathType Leaf)) {
+        Exit-WithError "找不到中文联合启动入口：$LaunchEntry"
+    }
+
     $MonitorExe = $null
     if (Test-Path -LiteralPath $PublishMonitor -PathType Leaf) {
         $MonitorExe = $PublishMonitor
@@ -112,11 +122,6 @@ dotnet publish -c Release -r win-x64 --self-contained true
     $GameDir = $ConfiguredGame[0]
     $GameLauncher = $ConfiguredGame[1]
 
-    $PowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    if (-not (Test-Path -LiteralPath $PowerShellExe -PathType Leaf)) {
-        $PowerShellExe = 'powershell.exe'
-    }
-
     $Desktop = [Environment]::GetFolderPath([Environment+SpecialFolder]::Desktop)
     if ([string]::IsNullOrWhiteSpace($Desktop)) {
         Exit-WithError '无法确定当前用户桌面路径。'
@@ -126,8 +131,8 @@ dotnet publish -c Release -r win-x64 --self-contained true
 
     $MonitorShortcutPath = Join-Path $Desktop 'E键监控工具.lnk'
     $MonitorShortcut = $Shell.CreateShortcut($MonitorShortcutPath)
-    $MonitorShortcut.TargetPath = $PowerShellExe
-    $MonitorShortcut.Arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $StandaloneLaunchScript
+    $MonitorShortcut.TargetPath = $StandaloneLaunchEntry
+    $MonitorShortcut.Arguments = ''
     $MonitorShortcut.WorkingDirectory = $ProjectRoot
     $MonitorShortcut.IconLocation = "$MonitorExe,0"
     $MonitorShortcut.Description = '单独启动 E 键监控悬浮工具'
@@ -135,8 +140,8 @@ dotnet publish -c Release -r win-x64 --self-contained true
 
     $GameShortcutPath = Join-Path $Desktop '永劫无间（E键提示）.lnk'
     $GameShortcut = $Shell.CreateShortcut($GameShortcutPath)
-    $GameShortcut.TargetPath = $PowerShellExe
-    $GameShortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f $LaunchScript
+    $GameShortcut.TargetPath = $LaunchEntry
+    $GameShortcut.Arguments = ''
     $GameShortcut.WorkingDirectory = $ProjectRoot
     $GameShortcut.IconLocation = "$GameLauncher,0"
     $GameShortcut.Description = '启动 E 键监控工具和永劫无间启动器'

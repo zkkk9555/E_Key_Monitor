@@ -8,7 +8,12 @@ internal static class Program
     private static void Main()
     {
         string[] args = Environment.GetCommandLineArgs();
-        bool followGame = args.Any(
+        bool launchGame = args.Any(
+            arg => string.Equals(
+                arg,
+                "--launch-game",
+                StringComparison.OrdinalIgnoreCase));
+        bool followGame = launchGame || args.Any(
             arg => string.Equals(
                 arg,
                 "--follow-game",
@@ -17,6 +22,6 @@ internal static class Program
         Application.SetHighDpiMode(HighDpiMode.SystemAware);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        Application.Run(new MainForm(followGame));
+        Application.Run(new MainForm(followGame, launchGame));
     }
 }
