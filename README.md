@@ -148,7 +148,7 @@ dotnet publish -c Release -r win-x64 --self-contained true
 bin\Release\net8.0-windows\win-x64\publish\E_Key_Monitor.exe
 ```
 
-这是 self-contained 发布目录，运行目标电脑不需要另外安装 .NET Runtime，但必须保留 publish 目录中的配套文件，不能只随意抽走一个 EXE。
+这是 self-contained 单文件发布（`PublishSingleFile`），运行目标电脑不需要另外安装 .NET Runtime。业务 EXE 只有一个：`E_Key_Monitor.exe`，双击即用。
 
 ### 便携版打包
 

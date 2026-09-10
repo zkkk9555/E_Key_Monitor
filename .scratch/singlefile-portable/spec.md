@@ -24,9 +24,9 @@ csproj 开 `PublishSingleFile`（win-x64 self-contained），`Package_E_Key_Moni
 
 - tdd n/a（发布形态任务，无可吞产品 seam；门禁 = publish 全绿 + 单文件契约 + 独立启动冒烟 + 静态门）。
 - Slices（spec 内嵌 checklist）：
-  - [ ] slice1 单文件发布：csproj 开关 + publish 全绿 + staging 契约（仅 EXE+config）+ 便携包 3 文件。
-  - [ ] slice2 独立冒烟：新目录解压（或复制 3 文件到空目录）→ 双击 EXE → 圆点可见 → 托盘菜单可用 → 退出无残留。
-  - [ ] slice3 文档同步：中文说明书附录 13 脚本用途表 + README/AGENTS 入口说明更新 + 静态门复查。
+  - [x] slice1 单文件发布：csproj 开关 + publish 全绿 + staging 契约（仅 EXE+config）+ 便携包 3 文件。
+  - [x] slice2 独立冒烟：新目录解压（或复制 3 文件到空目录）→ 双击 EXE → 圆点可见 → 托盘菜单可用 → 退出无残留。
+  - [x] slice3 文档同步：中文说明书附录 13 脚本用途表 + README/AGENTS 入口说明更新 + 静态门复查。
 
 ## Out of Scope
 

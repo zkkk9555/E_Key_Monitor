@@ -142,3 +142,23 @@ dotnet publish -c Release -r win-x64 --self-contained true
 ## 十、当前验证边界
 
 项目已完成 Release 构建和静态检查；本次没有把未执行的实际游戏启动、E 键模拟、圆点颜色切换或游戏退出清理验证写成已通过。工具仍然只观察输入和游戏进程，不执行输入模拟、内存注入或反作弊绕过。
+
+## 附录、源码目录脚本一览（维护者使用，日常不用）
+
+日常使用只需要便携包里的 `E_Key_Monitor.exe`。下面 13 个脚本都在源码目录里，解压后的便携包不包含它们：
+
+| 文件 | 用途 |
+| --- | --- |
+| `启动E键监控工具.bat` | 独立启动正式监控（调 `Start_E_Key_Monitor.ps1`） |
+| `启动永劫无间E键提示.bat` | 正式联合启动（调 `Start_Naraka_With_Monitor.ps1`） |
+| `开发启动永劫无间E键提示.bat` | 开发联合启动（调 `Start_Naraka_With_Monitor_Dev.ps1`） |
+| `生成中文桌面入口.bat` | 创建桌面快捷方式（调 `Create_Naraka_Monitor_Shortcut.ps1`） |
+| `制作便携版监控工具.bat` | 打便携包（调 `Package_E_Key_Monitor.ps1`） |
+| `Start_Naraka_With_Monitor.bat` | 正式启动的 ASCII 包装器 |
+| `Start_Naraka_With_Monitor_Dev.bat` | 开发启动的 ASCII 包装器 |
+| `Create_Naraka_Monitor_Shortcut.bat` | 快捷方式创建入口 |
+| `Start_E_Key_Monitor.ps1` | 独立启动正式监控逻辑 |
+| `Start_Naraka_With_Monitor.ps1` | 正式联合启动逻辑 |
+| `Start_Naraka_With_Monitor_Dev.ps1` | `dotnet run` 开发联合启动逻辑 |
+| `Create_Naraka_Monitor_Shortcut.ps1` | 创建两个桌面快捷方式 |
+| `Package_E_Key_Monitor.ps1` | 生成单文件便携包（含单文件契约校验） |
