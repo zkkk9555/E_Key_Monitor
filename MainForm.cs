@@ -475,18 +475,48 @@ internal sealed class MainForm : Form
             return true;
         }
 
+        // Pure standalone mode must not force game directory selection:
+        // the user may only want the E-key dot without the game installed.
+        // Follow/launch modes still require it and cancel means exit.
+        bool directoryRequired = _followGame || _launchGame;
+
         while (!_shuttingDown)
         {
             using FolderBrowserDialog dialog = new()
             {
-                Description = "请选择同时包含 StartGame.exe 和 NarakaBladepoint.exe 的游戏目录。",
+                Description = directoryRequired
+                    ? "请选择同时包含 StartGame.exe 和 NarakaBladepoint.exe 的游戏目录。"
+                    : "请选择同时包含 StartGame.exe 和 NarakaBladepoint.exe 的游戏目录（仅独立监控可跳过，以后可从托盘“设置游戏目录...”补选）。",
                 ShowNewFolderButton = false,
                 SelectedPath = Directory.Exists(_settings.GameDirectory) ? _settings.GameDirectory : string.Empty
             };
 
             if (dialog.ShowDialog(this) != DialogResult.OK)
             {
-                return false;
+                if (directoryRequired)
+                {
+                    return false;
+                }
+
+                DialogResult skipChoice = MessageBox.Show(
+                    this,
+                    "尚未设置游戏目录。\n\n选择“是”跳过并仅运行独立监控（以后可从托盘补选）；\n选择“否”重新选择目录；\n选择“取消”退出程序。",
+                    "E键监控工具",
+                    MessageBoxButtons.YesNoCancel,
+                    MessageBoxIcon.Question,
+                    MessageBoxDefaultButton.Button1);
+                if (skipChoice == DialogResult.Yes)
+                {
+                    LogDiagnostic("Skip game directory in standalone mode", 0);
+                    return true;
+                }
+
+                if (skipChoice == DialogResult.Cancel)
+                {
+                    return false;
+                }
+
+                continue;
             }
 
             if (!TryNormalizeAndValidateDirectory(dialog.SelectedPath, out normalizedDirectory, out string error))
