@@ -216,6 +216,7 @@ internal sealed class MainForm : Form
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpFrameChanged = 0x0020;
     private const long RenderRetryIntervalMs = 1000;
+    private const long ShutdownWatchdogMs = 8000;
 
     private static readonly TimeSpan GameStartTimeout = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan GameExitGracePeriod = TimeSpan.FromSeconds(5);
@@ -255,6 +256,7 @@ internal sealed class MainForm : Form
     private string? _lastDiagnosticLogPath;
     private bool _renderDirty;
     private long _lastRenderRetryTick;
+    private System.Threading.Timer? _shutdownWatchdog;
 
     private int _windowSize;
     private int _activeTimeMs;
@@ -1755,6 +1757,27 @@ internal sealed class MainForm : Form
 
         _shuttingDown = true;
         _trayIcon.Visible = false;
+
+        // Watchdog against zombie processes: if graceful close hangs
+        // (known 30s non-exit case), force-terminate after a timeout.
+        System.Threading.Timer? watchdog = null;
+        watchdog = new System.Threading.Timer(
+            _ =>
+            {
+                try
+                {
+                    LogDiagnostic("Shutdown watchdog timeout, forcing exit", 0);
+                }
+                finally
+                {
+                    Environment.Exit(1);
+                }
+            },
+            null,
+            ShutdownWatchdogMs,
+            System.Threading.Timeout.Infinite);
+        _shutdownWatchdog = watchdog;
+
         Close();
     }
 
@@ -1767,6 +1790,11 @@ internal sealed class MainForm : Form
 
         _resourcesDisposed = true;
         CancelDrag();
+
+        // Graceful close won the race: disarm the shutdown watchdog.
+        System.Threading.Timer? watchdog = System.Threading.Interlocked.Exchange(ref _shutdownWatchdog, null);
+        watchdog?.Dispose();
+
         _statusTimer.Stop();
         _gameTimer?.Stop();
 
