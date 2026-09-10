@@ -215,6 +215,7 @@ internal sealed class MainForm : Form
     private const uint SwpNoMove = 0x0002;
     private const uint SwpNoActivate = 0x0010;
     private const uint SwpFrameChanged = 0x0020;
+    private const long RenderRetryIntervalMs = 1000;
 
     private static readonly TimeSpan GameStartTimeout = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan GameExitGracePeriod = TimeSpan.FromSeconds(5);
@@ -252,6 +253,8 @@ internal sealed class MainForm : Form
     private bool _gameStartTimeoutNotified;
     private long? _gameMissingSinceTick;
     private string? _lastDiagnosticLogPath;
+    private bool _renderDirty;
+    private long _lastRenderRetryTick;
 
     private int _windowSize;
     private int _activeTimeMs;
@@ -318,7 +321,7 @@ internal sealed class MainForm : Form
             Location = ClampLocationToWorkingArea(Location, Screen.FromRectangle(Bounds).WorkingArea);
             if (_initialRenderCompleted)
             {
-                RenderLayeredWindow();
+                MarkRenderDirtyOnFailure(RenderLayeredWindow(), Environment.TickCount64);
             }
         };
 
@@ -821,8 +824,30 @@ internal sealed class MainForm : Form
         if (shouldBeActive != _isActive)
         {
             _isActive = shouldBeActive;
-            RenderLayeredWindow();
+            MarkRenderDirtyOnFailure(RenderLayeredWindow(), now);
         }
+        else if (_renderDirty && now - _lastRenderRetryTick >= RenderRetryIntervalMs)
+        {
+            // Transient render failures self-heal here at ~1 retry/second,
+            // throttled so the diagnostic log cannot be flooded.
+            _lastRenderRetryTick = now;
+            if (RenderLayeredWindow())
+            {
+                _renderDirty = false;
+            }
+        }
+    }
+
+    private void MarkRenderDirtyOnFailure(bool renderSucceeded, long nowTick)
+    {
+        if (renderSucceeded)
+        {
+            _renderDirty = false;
+            return;
+        }
+
+        _renderDirty = true;
+        _lastRenderRetryTick = nowTick;
     }
 
     private void InitializeVisibleWindow()
@@ -834,12 +859,17 @@ internal sealed class MainForm : Form
 
         ApplyPlacement(_position);
 
+        // The first visible render keeps the hard exit as a last resort, but
+        // arms the self-heal flag so later ticks can recover transient faults.
         if (!ApplyClickThroughStyle() || !RenderLayeredWindow())
         {
+            _renderDirty = true;
+            _lastRenderRetryTick = Environment.TickCount64;
             ShowInitialRenderFailureAndExit();
             return;
         }
 
+        _renderDirty = false;
         _initialRenderCompleted = true;
         _statusTimer.Start();
         _gameTimer?.Start();
@@ -879,11 +909,23 @@ internal sealed class MainForm : Form
         Rectangle workingArea = Screen.FromRectangle(windowBounds).WorkingArea;
         if (!workingArea.Contains(windowBounds))
         {
-            return LogRenderFailure(
-                "Validate window coordinates",
-                0,
-                new InvalidOperationException(
-                    $"Window bounds {windowBounds} are outside working area {workingArea}."));
+            // Contain instead of failing: clamp a partially-off-screen window
+            // back into the working area and keep rendering.
+            Point contained = ClampLocationToWorkingArea(Location, workingArea);
+            if (contained != Location)
+            {
+                Location = contained;
+                windowBounds = new(contained.X, contained.Y, width, height);
+            }
+
+            if (!workingArea.Contains(windowBounds))
+            {
+                return LogRenderFailure(
+                    "Validate window coordinates",
+                    0,
+                    new InvalidOperationException(
+                        $"Window bounds {windowBounds} are outside working area {workingArea}."));
+            }
         }
 
         long requiredStyles = WsExLayered | WsExNoActivate | WsExToolWindow;
@@ -1297,7 +1339,7 @@ internal sealed class MainForm : Form
         _settings.DotSize = dotSize;
         SaveSettingsSafely();
         UpdateMenuChecks();
-        RenderLayeredWindow();
+        MarkRenderDirtyOnFailure(RenderLayeredWindow(), Environment.TickCount64);
     }
 
     private void SetDockPosition(DockPosition position)
@@ -1312,7 +1354,7 @@ internal sealed class MainForm : Form
         ApplyPlacement(position);
         SaveSettingsSafely();
         UpdateMenuChecks();
-        RenderLayeredWindow();
+        MarkRenderDirtyOnFailure(RenderLayeredWindow(), Environment.TickCount64);
     }
 
     private void SetClickThrough(bool clickThrough)
