@@ -240,7 +240,8 @@ internal sealed class MonitorSettings
 
 internal sealed class MainForm : Form
 {
-    private const int VkE = 0x45;    private const int WmKeyDown = 0x0100;
+    private const int VkE = 0x45;
+    private const int WmKeyDown = 0x0100;
     private const int WmSysKeyDown = 0x0104;
     private const int WhKeyboardLl = 13;
     private const int WsExTransparent = 0x00000020;

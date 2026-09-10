@@ -207,7 +207,7 @@ AppContext.BaseDirectory\config.json
 
 说明：
 
-- `key` 当前保留为未来扩展，实际 Hook 仍固定监听 `E`。
+- `key` 为观察键（单个 A-Z/0-9，不区分大小写，默认 `E`），`MonitorSettings.TryParseObserveKey` 解析归一化，非法值回退 `E`；`HookCallback` 按解析后的 VK 比较，托盘标题显示当前键。
 - `gameDirectory` 保存经验证的游戏目录绝对路径；根目录模板默认是 `null`，首次启动选择成功后保存，路径失效时重新选择。
 - 无配置、JSON 损坏或字段无效时回退到安全默认值。
 - 保存配置失败只能记录诊断，不能让程序崩溃。
@@ -352,3 +352,19 @@ E_Key_Monitor.exe
 - 修改代码后至少执行 `dotnet build -c Release`，并报告真实结果。
 - 不要声称未实际执行的 GUI、键盘或游戏联动测试已经通过。
 - 文档、源码和脚本中的路径说明必须以当前 C 盘源码与上述真实游戏目录为准。
+
+## Agent skills
+
+### Issue tracker
+
+Local markdown under `.scratch/` (one directory per effort). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Five canonical roles with identical label strings. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `AGENTS.md` + `docs/agents/` + `docs/adr/`. See `docs/agents/domain.md`.
+
+若 `.scratch/WORKFLOW-ACTIVE.md` 存在 → 先调 autopilot 再继续；新任务开局拿不准走哪条路时 → 也先调它分流。
