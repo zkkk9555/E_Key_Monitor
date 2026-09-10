@@ -30,7 +30,10 @@ internal enum DockPosition
 
 internal sealed class MonitorSettings
 {
+    public const int DefaultObserveVkCode = 0x45;
+
     public string Key { get; set; } = "E";
+    public int ObserveVkCode { get; set; } = DefaultObserveVkCode;
     public int ActiveTimeMs { get; set; } = 200;
     public int WindowSize { get; set; } = 40;
     public double Opacity { get; set; } = 0.8;
@@ -101,6 +104,38 @@ internal sealed class MonitorSettings
         return Path.Combine(AppContext.BaseDirectory, "config.json");
     }
 
+    /// <summary>
+    /// Parses a configured observe key (single A-Z/0-9, case-insensitive)
+    /// into its virtual-key code. Returns false for anything else so the
+    /// caller can fall back to E.
+    /// </summary>
+    internal static bool TryParseObserveKey(string? key, out int vkCode, out string normalizedName)
+    {
+        vkCode = DefaultObserveVkCode;
+        normalizedName = "E";
+
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return false;
+        }
+
+        string trimmed = key.Trim();
+        if (trimmed.Length != 1)
+        {
+            return false;
+        }
+
+        char candidate = char.ToUpperInvariant(trimmed[0]);
+        if ((candidate >= 'A' && candidate <= 'Z') || (candidate >= '0' && candidate <= '9'))
+        {
+            vkCode = candidate;
+            normalizedName = candidate.ToString();
+            return true;
+        }
+
+        return false;
+    }
+
     private static MonitorSettings Merge(MonitorConfigDto? dto)
     {
         MonitorSettings settings = new();
@@ -114,6 +149,17 @@ internal sealed class MonitorSettings
         {
             settings.Key = dto.Key.Trim();
         }
+
+        // The observe key is user-configurable (A-Z/0-9, case-insensitive).
+        // Anything else falls back to E so a typo can never blind the monitor.
+        if (!TryParseObserveKey(settings.Key, out int observeVk, out string observeName))
+        {
+            observeVk = DefaultObserveVkCode;
+            observeName = "E";
+        }
+
+        settings.Key = observeName;
+        settings.ObserveVkCode = observeVk;
 
         if (dto.ActiveTime is > 0)
         {
@@ -194,8 +240,7 @@ internal sealed class MonitorSettings
 
 internal sealed class MainForm : Form
 {
-    private const int VkE = 0x45;
-    private const int WmKeyDown = 0x0100;
+    private const int VkE = 0x45;    private const int WmKeyDown = 0x0100;
     private const int WmSysKeyDown = 0x0104;
     private const int WhKeyboardLl = 13;
     private const int WsExTransparent = 0x00000020;
@@ -257,6 +302,8 @@ internal sealed class MainForm : Form
     private bool _renderDirty;
     private long _lastRenderRetryTick;
     private System.Threading.Timer? _shutdownWatchdog;
+    private int _observeVkCode = VkE;
+    private string _observeKeyName = "E";
 
     private int _windowSize;
     private int _activeTimeMs;
@@ -278,6 +325,13 @@ internal sealed class MainForm : Form
         _dotSize = _settings.DotSize;
         _position = _settings.Position;
         _clickThrough = _settings.ClickThrough;
+        _observeVkCode = _settings.ObserveVkCode;
+        _observeKeyName = _settings.Key;
+
+        if (_observeVkCode != VkE)
+        {
+            LogDiagnostic($"Observe key configured: {_observeKeyName} (VK=0x{_observeVkCode:X})", 0);
+        }
 
         Text = "E键监控工具";
         AutoScaleMode = AutoScaleMode.None;
@@ -310,7 +364,7 @@ internal sealed class MainForm : Form
         {
             Icon = _applicationIcon ?? SystemIcons.Application,
             Visible = true,
-            Text = "E键监控工具",
+            Text = $"E键监控工具({_observeKeyName})",
             ContextMenuStrip = _trayMenu
         };
 
@@ -833,7 +887,7 @@ internal sealed class MainForm : Form
                 if (message is WmKeyDown or WmSysKeyDown)
                 {
                     int vkCode = Marshal.ReadInt32(lParam);
-                    if (vkCode == VkE)
+                    if (vkCode == _observeVkCode)
                     {
                         _lastTriggerTick = Environment.TickCount64;
                     }
@@ -1500,8 +1554,10 @@ internal sealed class MainForm : Form
             }
         }
 
+        // Fallback matches the default position (MiddleLeft) so a lost
+        // custom coordinate never surprises the user on another screen.
         Screen primaryScreen = Screen.PrimaryScreen ?? Screen.FromPoint(Cursor.Position);
-        return GetPresetLocation(DockPosition.MiddleRight, primaryScreen.WorkingArea);
+        return GetPresetLocation(DockPosition.MiddleLeft, primaryScreen.WorkingArea);
     }
 
     private bool TryClampVisibleLocation(Point desiredLocation, out Point clampedLocation)
