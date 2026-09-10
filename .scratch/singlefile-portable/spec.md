@@ -43,3 +43,16 @@ csproj 开 `PublishSingleFile`（win-x64 self-contained），`Package_E_Key_Moni
 - Gate 0: `PublishSingleFile` 在 csproj 零命中 = MISS（打包脚本传参有但非默认，新机制）。Shield: `credential|spend|upload|submit|上架|支付` 在 ps1/bat 零命中，无外部性。
 
 Checks: i18n N/A（无新本地化串）/ save Pass（config 默认值契约由打包脚本断言）/ BALANCE N/A（无数值系统）
+
+## Review（双轴，fixed point da23b5c，2026-09-10）
+
+### Standards
+
+- 无 hard violation。csproj 新增 3 行发布开关 + 注释，与打包脚本已有参数对齐，无重复语义冲突；文档附录纯 Markdown 表格，无代码异味。LF/CRLF 由构建守门（0 警告）。
+
+### Spec（3 slices 对账）
+
+- slice1 ✓：`Package_E_Key_Monitor.ps1` 全绿，便携包恰好 3 文件，EXE 155M（>1MB 自包含门），staging 契约（仅 EXE+config）通过。
+- slice2 ✓：空目录独立启动，进程存活（PID 21528，内存约 107MB），弹出目录选择（config 为 null 模板符合预期），taskkill 后无残留，smoke 目录已删。圆点/托盘目视未做（无障碍树抓不到悬浮窗，前台有用户应用在用，不硬抢焦点截图），如实记为部分验证。
+- slice3 ✓：中文说明书附录 13 脚本用途表 + README 单文件入口措辞 + 静态门复查全绿。
+- 缺口：零新增缺口。Scope creep：零（BAT/PS1 零改动）。
