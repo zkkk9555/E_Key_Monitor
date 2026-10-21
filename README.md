@@ -9,7 +9,7 @@
 唯一有效的源码目录：
 
 ```text
-C:\Projects\E_Key_Monitor
+C:\Project\E_Key_Monitor
 ```
 
 其他位置的 `E_Key_Monitor` 副本不是当前源码，尤其不要使用或修改 E 盘保存的项目备份。
@@ -101,14 +101,14 @@ E:\Youxi\网吧极速版\program
 普通模式只运行提示工具，不观察游戏进程，也不会因游戏退出自动关闭；但当前实现仍会在启动时校验 `gameDirectory`。第一次运行或配置无效时会弹出目录选择框，必须选择同时包含 `StartGame.exe` 和 `NarakaBladepoint.exe` 的目录，取消选择会退出。目录配置有效后，即使游戏进程没有运行，提示工具也可以继续运行，需要从托盘菜单手动退出。
 
 ```powershell
-cd "C:\Projects\E_Key_Monitor"
+cd "C:\Project\E_Key_Monitor"
 dotnet run
 ```
 
 ## 游戏跟随开发运行
 
 ```powershell
-cd "C:\Projects\E_Key_Monitor"
+cd "C:\Project\E_Key_Monitor"
 dotnet run -- --follow-game
 ```
 
@@ -132,7 +132,7 @@ NarakaBladepoint
 Release 构建：
 
 ```powershell
-cd "C:\Projects\E_Key_Monitor"
+cd "C:\Project\E_Key_Monitor"
 dotnet build -c Release
 ```
 
