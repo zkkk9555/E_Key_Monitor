@@ -12,13 +12,15 @@
 C:\Project\E_Key_Monitor
 ```
 
-其他位置的 `E_Key_Monitor` 副本不是当前源码，尤其不要使用或修改 E 盘保存的项目备份。
+其他位置的 `E_Key_Monitor` 副本不是当前源码。
 
-E 盘上的以下目录是实际游戏安装位置，不是项目源码：
+游戏安装目录因机器而异。在使用者的部署机上通常是下面这个路径，**它只是示例，不是仓库事实**：
 
 ```text
 E:\Youxi\网吧极速版\program
 ```
+
+真实目录由程序在第一次运行时选择，并保存到 EXE 旁边的 `config.json`。换一台电脑就重新选一次。
 
 ## 实际效果
 
@@ -31,7 +33,7 @@ E:\Youxi\网吧极速版\program
 - 支持托盘菜单、大小切换、六个位置预设和自定义拖动位置。
 - 支持独立运行和随《永劫无间》退出的游戏跟随模式。
 - EXE、托盘和独立监控快捷方式使用专用 E 键状态图标。
-- 当前实现启动时会校验 `gameDirectory`；配置缺失或无效时会要求选择同时包含两个游戏 EXE 的目录，取消选择会退出。
+- 独立模式**可以**不选游戏目录：取消选择后会再问一次，选「是」就跳过，只跑圆点提示。
 
 当前颜色：
 
@@ -98,7 +100,7 @@ E:\Youxi\网吧极速版\program
 
 ## 普通独立运行
 
-普通模式只运行提示工具，不观察游戏进程，也不会因游戏退出自动关闭；但当前实现仍会在启动时校验 `gameDirectory`。第一次运行或配置无效时会弹出目录选择框，必须选择同时包含 `StartGame.exe` 和 `NarakaBladepoint.exe` 的目录，取消选择会退出。目录配置有效后，即使游戏进程没有运行，提示工具也可以继续运行，需要从托盘菜单手动退出。
+普通模式只运行提示工具，不观察游戏进程，也不会因游戏退出自动关闭。第一次运行或配置无效时会弹出目录选择框；**这一步可以跳过**——取消选择后程序会再问一次：选「是」只跑独立监控，选「否」重新选择目录，选「取消」退出程序。目录配置有效后，即使游戏进程没有运行，提示工具也可以继续运行，需要从托盘菜单手动退出。
 
 ```powershell
 cd "C:\Project\E_Key_Monitor"
@@ -162,7 +164,7 @@ bin\Release\net8.0-windows\win-x64\publish\E_Key_Monitor.exe
 
 ## 两种 EXE 运行模式
 
-当前验证环境的游戏路径（启动脚本不硬编码此路径）：
+使用者部署机上的游戏路径示例（启动脚本不硬编码此路径，也不是仓库事实）：
 
 ```text
 游戏目录：E:\Youxi\网吧极速版\program
@@ -171,7 +173,7 @@ bin\Release\net8.0-windows\win-x64\publish\E_Key_Monitor.exe
 进程名：  NarakaBladepoint
 ```
 
-根目录 `config.json` 的 `gameDirectory` 默认是 `null`。第一次启动时，程序会显示“设置游戏目录...”选择框；选择成功后保存到 EXE 旁边的 `config.json`。以后目录有效就不再询问，目录不存在或缺少游戏文件时才重新选择。
+根目录 `config.json` 的 `gameDirectory` 默认是 `null`。第一次启动时，程序会显示“设置游戏目录...”选择框；选择成功后保存到 EXE 旁边的 `config.json`。以后目录有效就不再询问，目录不存在或缺少游戏文件时才重新选择。独立模式允许跳过这一步。
 
 独立监控模式：
 
@@ -253,29 +255,33 @@ E键监控工具
 ```text
 E_Key_Monitor/
 ├── .gitignore
+├── .scratch/                             # 工作流留痕：spec / issues / NOTES
+├── AGENTS.md
+├── Create_Naraka_Monitor_Shortcut.bat
+├── Create_Naraka_Monitor_Shortcut.ps1
+├── docs/adr/                             # 决策记录（ADR）
+├── docs/agents/                          # agent 侧约定
+├── docs/superpowers/                     # 历史计划与设计记录
+├── E_Key_Monitor-icon.png
 ├── E_Key_Monitor.csproj
 ├── E_Key_Monitor.ico
-├── E_Key_Monitor-icon.png
-├── Program.cs
+├── E键监控工具中文使用说明书.md
 ├── MainForm.cs
-├── config.json
-├── 启动E键监控工具.bat
-├── 启动永劫无间E键提示.bat
-├── 开发启动永劫无间E键提示.bat
-├── 生成中文桌面入口.bat
-├── 制作便携版监控工具.bat
 ├── Package_E_Key_Monitor.ps1
+├── Program.cs
+├── README.md
 ├── Start_E_Key_Monitor.ps1
 ├── Start_Naraka_With_Monitor.bat
 ├── Start_Naraka_With_Monitor.ps1
 ├── Start_Naraka_With_Monitor_Dev.bat
 ├── Start_Naraka_With_Monitor_Dev.ps1
-├── Create_Naraka_Monitor_Shortcut.bat
-├── Create_Naraka_Monitor_Shortcut.ps1
-├── E键监控工具中文使用说明书.md
-├── docs/superpowers/                  # 计划和设计记录
-├── README.md
-└── AGENTS.md
+├── config.json
+├── tools/verify-conventions.ps1          # 约定校验器
+├── 制作便携版监控工具.bat
+├── 启动E键监控工具.bat
+├── 启动永劫无间E键提示.bat
+├── 开发启动永劫无间E键提示.bat
+└── 生成中文桌面入口.bat
 ```
 
 主要逻辑集中在 `MainForm.cs`：
@@ -332,31 +338,27 @@ Package_E_Key_Monitor.ps1
 
 ### 联合启动失败
 
-打开当前便携文件夹中的 `E_Key_Monitor.exe`，右键托盘图标并选择“设置游戏目录...”重新选择。若仍然失败，再检查以下文件：
+打开当前便携文件夹中的 `E_Key_Monitor.exe`，右键托盘图标并选择“设置游戏目录...”重新选择。若仍然失败，再检查两处：
 
 ```text
-E:\Youxi\网吧极速版\program\StartGame.exe
-E:\Youxi\网吧极速版\program\NarakaBladepoint.exe
-bin\Release\net8.0-windows\win-x64\publish\E_Key_Monitor.exe
+<你选的游戏目录>\StartGame.exe
+<你选的游戏目录>\NarakaBladepoint.exe
 ```
+
+在源码目录运行时，还要确认 `bin\Release\net8.0-windows\win-x64\publish\E_Key_Monitor.exe` 存在。
 
 同时确认 `E_Key_Monitor.exe` 和 `config.json` 在便携文件夹中。不要把 EXE 单独从文件夹中拿出来运行。
 
 ## 当前核查状态
 
-截至 2026-07-24，本次只读核查结果如下：
+核查结论只维护一份，写在 [AGENTS.md](AGENTS.md) 的「当前核查状态」一节（带日期，附可复算的命令）。本文件不重复抄一遍，避免两处一起过期。
 
-- VERIFIED：Windows x64 环境安装 .NET SDK `8.0.422`。
-- VERIFIED：`dotnet build -c Release --no-restore` 退出码为 0，0 个警告、0 个错误。
-- VERIFIED：`dotnet publish -c Release -r win-x64 --self-contained true --no-restore` 退出码为 0；最终便携目录和 ZIP 已在 `C:\tmp` 生成。
-- VERIFIED：`dotnet format E_Key_Monitor.csproj --verify-no-changes --no-restore` 退出码为 0。
-- VERIFIED：5 个根目录 PS1 均为 UTF-8 with BOM，PowerShell 5.1 静态解析无错误；8 个 BAT 均为纯 ASCII；根目录 `config.json` 可解析且 `gameDirectory` 默认为空；安全边界静态搜索未发现输入注入、鼠标 Hook、进程注入或直接启动/终止游戏的命中。
-- PARTIAL：`dotnet test -c Release --no-restore --verbosity normal` 退出码为 0，但项目没有测试项目或测试用例，因此不能据此声称有自动化测试通过。
-- VERIFIED：当前验证环境中的 `StartGame.exe`、`NarakaBladepoint.exe` 均存在，`NarakaBladepoint` 进程核查时未运行。
-- PARTIAL：已配置运行目录中的监控 EXE 能启动并保持响应，`--follow-game` 在没有游戏进程时能保持等待；通过外部关闭窗口请求后，进程在 30 秒内未退出，本次测试进程需要强制清理。根因未定位，托盘菜单“退出”路径未单独验证。
-- STALE：当前桌面两个快捷方式仍指向 `C:\Users\24310\Projects\E_Key_Monitor`，不是本源码目录；项目目录内没有可用 `.lnk` 文件。需要重新运行创建脚本。
-- VERIFIED：最终便携包实际只包含一个 EXE、`config.json` 和中文说明书；ZIP 中没有 BAT 或 PS1。
-- UNKNOWN：本次没有模拟 `E` 键、验证圆点颜色切换、实际启动游戏、验证游戏退出后的 5 秒跟随清理、从托盘创建桌面快捷方式或实际双击便携包 EXE。
-- VERIFIED：本次修改集中在 `Program.cs`、`MainForm.cs`、配置、打包脚本和文档；没有修改测试、依赖或锁文件。
+改动任何规范文档或脚本后，跑一次约定校验：
 
-当前目录是可用的 Git 工作树；核查到当前分支为 `main`，最近提交为 `838e43e Initial commit`。本次保留所有未提交修改，没有执行提交、重置、切换或清理。`bin/`、`obj/` 和本地 .NET 工具目录属于生成内容，不是源代码。
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\verify-conventions.ps1
+```
+
+退出码 0 = 全部通过。
+
+当前目录是可用的 Git 工作树；当前分支和提交信息以实际 `git status` 和 `git log -1` 为准。`bin/`、`obj/` 和本地 .NET 工具目录属于生成内容，不是源代码。

@@ -1,5 +1,7 @@
 # 单 EXE 便携启动与双快捷方式设计
 
+> **状态（2026-10-22 核对）：** 本设计**已经落地**（`PublishSingleFile=true`、打包脚本产出三件套便携包、EXE 托盘菜单生成两个指向 EXE 的桌面快捷方式）。保留此文件作为历史设计记录；当前事实以仓库根目录 `AGENTS.md` 和 `docs/adr/0002-single-file-self-contained-portable.md` 为准。
+
 ## 目标
 
 将日常使用收敛为一个可复制、可压缩、可解压运行的文件夹。用户只需要使用两个桌面快捷方式：单独启动监控，或启动 `StartGame.exe` 与监控工具。最终便携包不暴露 BAT、PowerShell、开发脚本或旧快捷方式生成脚本。

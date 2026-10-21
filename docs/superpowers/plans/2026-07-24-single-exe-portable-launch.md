@@ -1,5 +1,7 @@
 # 单 EXE 便携启动与双快捷方式 Implementation Plan
 
+> **状态（2026-10-22 核对）：** 这份计划描述的工作**已经实现并发布**（单文件 self-contained EXE + 两个直接指向 EXE 的桌面快捷方式）。下面的复选框是当时的执行记录、没有回填，**不要照着重做一遍**。当前事实以仓库根目录 `AGENTS.md` 为准。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 将日常使用收敛为一个 `E_Key_Monitor.exe` 和两个直接指向 EXE 的桌面快捷方式，首次选择并保存游戏目录，便携包不暴露 BAT 或 PowerShell 入口。
