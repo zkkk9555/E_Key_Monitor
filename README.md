@@ -29,6 +29,7 @@ E:\Youxi\网吧极速版\program
 - 鼠标宏连续高频触发：圆点持续保持青绿色，不会疯狂闪烁。
 - 宏停止约 `200ms`：圆点恢复偏白色。
 - 圆点无边框、置顶、背景逐像素透明，不显示任务栏按钮。
+- 圆点大小按**屏幕高度的百分比**算（默认 3%），在每块显示屏上占比一致，也不会因为 Windows 缩放百分比不同而变大变小。
 - 默认启用鼠标穿透，不影响游戏中的鼠标点击。
 - 支持托盘菜单、大小切换、六个位置预设和自定义拖动位置。
 - 支持独立运行和随《永劫无间》退出的游戏跟随模式。
@@ -162,6 +163,22 @@ bin\Release\net8.0-windows\win-x64\publish\E_Key_Monitor.exe
 
 脚本会在项目目录外生成 `..\artifacts\E_Key_Monitor-portable` 和旁边的 `E_Key_Monitor-portable.zip`。便携包只包含 Windows x64 自包含的 `E_Key_Monitor.exe`、可写的 `config.json` 和中文说明书，不依赖源码目录或单独安装 .NET Runtime。解压后直接启动 EXE；第一次启动选择游戏目录，之后沿用保存的目录，目录失效时才重新选择。
 
+## 开机自启与常驻跟随
+
+托盘右键菜单里有「**开机自启**」开关：
+
+- 打开后写入当前用户的启动项（`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`），值是当前 EXE 的完整路径加 `--watch`，**不需要管理员权限**。
+- 默认是关的，只有你点了开关才会写；再点一次就删掉，删掉即恢复原样。
+- 便携文件夹如果被挪走，旧的启动项会失效，菜单会自动显示为未开启。
+
+开机启动的实例带 `--watch` 参数，行为是：
+
+- 开机后程序只在托盘里待命，**不显示圆点**。
+- 你打开《永劫无间》，圆点自动出现。
+- 你关掉游戏，圆点约 5 秒后自动消失，**程序继续留在托盘**，等你下次再开。
+
+这样设好开机自启后，平时不用管这个软件。
+
 ## 两种 EXE 运行模式
 
 使用者部署机上的游戏路径示例（启动脚本不硬编码此路径，也不是仓库事实）：
@@ -219,7 +236,6 @@ E键监控工具
 {
   "key": "E",
   "activeTime": 200,
-  "windowSize": 40,
   "opacity": 0.8,
   "dotSize": "Medium",
   "position": "MiddleLeft",
@@ -240,7 +256,6 @@ E键监控工具
 | --- | --- |
 | `key` | 观察键（单个 A-Z/0-9，不区分大小写，默认 `E`，非法值回退 `E`）；托盘标题显示当前键 |
 | `activeTime` | 触发后保持高亮青绿色的毫秒数 |
-| `windowSize` | 悬浮窗口尺寸 |
 | `opacity` | 圆点整体透明度，范围 0.1 到 1.0 |
 | `dotSize` | `Small`、`Medium` 或 `Large` |
 | `position` | 位置预设或 `Custom` |
@@ -257,6 +272,7 @@ E_Key_Monitor/
 ├── .gitignore
 ├── .scratch/                             # 工作流留痕：spec / issues / NOTES
 ├── AGENTS.md
+├── AutoStartManager.cs                   # 开机自启：当前用户 Run 键的读写
 ├── Create_Naraka_Monitor_Shortcut.bat
 ├── Create_Naraka_Monitor_Shortcut.ps1
 ├── docs/adr/                             # 决策记录（ADR）

@@ -178,7 +178,7 @@ Write-Result 'ps1-bom' ($ps1WithoutBom.Count -eq 0) $ps1Detail
 
 # --- C3 config-fields: 根 config.json 字段齐且 gameDirectory 为空 ---
 $configPath = Join-Path $RepoRoot 'config.json'
-$expectedFields = @('key', 'activeTime', 'windowSize', 'opacity', 'dotSize', 'position', 'customX', 'customY', 'clickThrough', 'gameDirectory')
+$expectedFields = @('key', 'activeTime', 'opacity', 'dotSize', 'position', 'customX', 'customY', 'clickThrough', 'gameDirectory')
 $configOk = $false
 $configDetail = 'config.json 不可解析'
 try {
@@ -188,7 +188,7 @@ try {
     $extraFields = @($actualFields | Where-Object { $_ -notin $expectedFields })
     if ($missingFields.Count -eq 0 -and $extraFields.Count -eq 0 -and $null -eq $config.gameDirectory) {
         $configOk = $true
-        $configDetail = '10 个字段齐备，gameDirectory 为 null'
+        $configDetail = '9 个字段齐备，gameDirectory 为 null'
     }
     else {
         $configDetail = ("缺少字段: " + ($missingFields -join ', ') + "; 多出字段: " + ($extraFields -join ', ') + "; gameDirectory=" + $config.gameDirectory)

@@ -23,6 +23,7 @@ Terminology lives in one place only: project vocabulary in `AGENTS.md`, this eff
 | `docs/adr/0001-observe-only-boundary.md` | 只观察，不干预输入 |
 | `docs/adr/0002-single-file-self-contained-portable.md` | 便携包用单文件 self-contained 发布 |
 | `docs/adr/0003-config-next-to-executable.md` | 配置跟着 EXE 放，不放用户目录 |
+| `docs/adr/0004-screen-relative-dot-and-user-run-autostart.md` | 圆点按屏幕比例定尺寸；开机自启用当前用户 Run 键 |
 
 New decisions that are hard to reverse, surprising without context, and the result of a real trade-off go here: `docs/adr/NNNN-<slug>.md`, one file per decision.
 

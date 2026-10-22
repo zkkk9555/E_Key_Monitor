@@ -8,20 +8,21 @@ internal static class Program
     private static void Main()
     {
         string[] args = Environment.GetCommandLineArgs();
-        bool launchGame = args.Any(
-            arg => string.Equals(
-                arg,
-                "--launch-game",
-                StringComparison.OrdinalIgnoreCase));
-        bool followGame = launchGame || args.Any(
-            arg => string.Equals(
-                arg,
-                "--follow-game",
-                StringComparison.OrdinalIgnoreCase));
+        bool launchGame = HasFlag(args, "--launch-game");
+        bool watchMode = HasFlag(args, "--watch");
+        bool followGame = launchGame || watchMode || HasFlag(args, "--follow-game");
 
-        Application.SetHighDpiMode(HighDpiMode.SystemAware);
+        // Per-monitor awareness keeps the window in real device pixels, so the
+        // dot can be sized against the screen instead of against the Windows
+        // scaling percentage.
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
         Application.SetCompatibleTextRenderingDefault(false);
-        Application.Run(new MainForm(followGame, launchGame));
+        Application.Run(new MainForm(followGame, launchGame, watchMode));
+    }
+
+    private static bool HasFlag(string[] args, string flag)
+    {
+        return args.Any(arg => string.Equals(arg, flag, StringComparison.OrdinalIgnoreCase));
     }
 }

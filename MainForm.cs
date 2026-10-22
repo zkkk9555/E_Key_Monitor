@@ -35,7 +35,6 @@ internal sealed class MonitorSettings
     public string Key { get; set; } = "E";
     public int ObserveVkCode { get; set; } = DefaultObserveVkCode;
     public int ActiveTimeMs { get; set; } = 200;
-    public int WindowSize { get; set; } = 40;
     public double Opacity { get; set; } = 0.8;
     public DotSizeOption DotSize { get; set; } = DotSizeOption.Medium;
     public DockPosition Position { get; set; } = DockPosition.MiddleLeft;
@@ -78,7 +77,6 @@ internal sealed class MonitorSettings
         {
             Key = Key,
             ActiveTime = ActiveTimeMs,
-            WindowSize = WindowSize,
             Opacity = Opacity,
             DotSize = DotSize.ToString(),
             Position = Position.ToString(),
@@ -166,11 +164,6 @@ internal sealed class MonitorSettings
             settings.ActiveTimeMs = Math.Clamp(dto.ActiveTime.Value, 1, 10000);
         }
 
-        if (dto.WindowSize is > 0)
-        {
-            settings.WindowSize = Math.Clamp(dto.WindowSize.Value, 24, 400);
-        }
-
         if (dto.Opacity is > 0)
         {
             settings.Opacity = Math.Clamp(dto.Opacity.Value, 0.1, 1.0);
@@ -212,9 +205,6 @@ internal sealed class MonitorSettings
         [JsonPropertyName("activeTime")]
         public int? ActiveTime { get; set; }
 
-        [JsonPropertyName("windowSize")]
-        public int? WindowSize { get; set; }
-
         [JsonPropertyName("opacity")]
         public double? Opacity { get; set; }
 
@@ -251,6 +241,14 @@ internal sealed class MainForm : Form
     private const int GwlExStyle = -20;
     private const int PlacementMargin = 16;
     private const int DotMargin = 6;
+
+    // The dot is sized as a share of the screen height, so it occupies the same
+    // proportion on every monitor and is not inflated by the Windows scaling
+    // percentage (the app is per-monitor DPI aware, so its coordinates are
+    // real device pixels).
+    private const double SmallDotScreenRatio = 0.020;
+    private const double MediumDotScreenRatio = 0.030;
+    private const double LargeDotScreenRatio = 0.040;
     private const string FollowedProcessName = "NarakaBladepoint";
     private const uint BiRgb = 0;
     private const uint DibRgbColors = 0;
@@ -282,6 +280,7 @@ internal sealed class MainForm : Form
     private readonly MenuItemSet _trayMenuItems;
     private readonly bool _followGame;
     private readonly bool _launchGame;
+    private readonly bool _watchMode;
     private readonly long _gameStartTick;
 
     private LowLevelKeyboardProc? _keyboardProc;
@@ -292,7 +291,6 @@ internal sealed class MainForm : Form
     private bool _shuttingDown;
     private bool _placementInitialized;
     private bool _resourcesDisposed;
-    private bool _initialRenderCompleted;
     private bool _initialRenderFailureShown;
     private bool _isDragging;
     private bool _dragMoved;
@@ -306,7 +304,6 @@ internal sealed class MainForm : Form
     private int _observeVkCode = VkE;
     private string _observeKeyName = "E";
 
-    private int _windowSize;
     private int _activeTimeMs;
     private double _windowOpacity;
     private DotSizeOption _dotSize;
@@ -314,13 +311,13 @@ internal sealed class MainForm : Form
     private Point _dragStartCursor;
     private Point _dragStartLocation;
 
-    public MainForm(bool followGame, bool launchGame)
+    public MainForm(bool followGame, bool launchGame, bool watchMode)
     {
         _followGame = followGame;
         _launchGame = launchGame;
+        _watchMode = watchMode;
         _gameStartTick = Environment.TickCount64;
         _settings = MonitorSettings.Load();
-        _windowSize = _settings.WindowSize;
         _activeTimeMs = _settings.ActiveTimeMs;
         _windowOpacity = _settings.Opacity;
         _dotSize = _settings.DotSize;
@@ -340,7 +337,7 @@ internal sealed class MainForm : Form
         FormBorderStyle = FormBorderStyle.None;
         ShowInTaskbar = false;
         TopMost = true;
-        ClientSize = new Size(_windowSize, _windowSize);
+        ApplyDotMetrics();
 
         _statusTimer = new System.Windows.Forms.Timer
         {
@@ -376,7 +373,7 @@ internal sealed class MainForm : Form
         SizeChanged += (_, _) =>
         {
             Location = ClampLocationToWorkingArea(Location, Screen.FromRectangle(Bounds).WorkingArea);
-            if (_initialRenderCompleted)
+            if (Visible)
             {
                 MarkRenderDirtyOnFailure(RenderLayeredWindow(), Environment.TickCount64);
             }
@@ -440,8 +437,38 @@ internal sealed class MainForm : Form
     {
         base.OnShown(e);
 
+        if (_watchMode)
+        {
+            // Watch mode stays in the tray until the game shows up, so the dot
+            // is never painted at startup.
+            StartTimers();
+            Hide();
+            return;
+        }
+
         // Run after the first visible message so the layered window has a live handle.
         BeginInvoke(InitializeVisibleWindow);
+    }
+
+    protected override void WndProc(ref Message m)
+    {
+        const int WmDpiChanged = 0x02E0;
+        if (m.Msg == WmDpiChanged)
+        {
+            base.WndProc(ref m);
+
+            // The window moved to a monitor with a different scale: the dot has
+            // to be recomputed for the new screen, then redrawn.
+            ApplyDotMetrics();
+            if (Visible)
+            {
+                MarkRenderDirtyOnFailure(RenderLayeredWindow(), Environment.TickCount64);
+            }
+
+            return;
+        }
+
+        base.WndProc(ref m);
     }
 
     protected override void OnPaintBackground(PaintEventArgs e)
@@ -465,6 +492,7 @@ internal sealed class MainForm : Form
         ContextMenuStrip menu = new();
         ToolStripMenuItem gameDirectoryItem = new("设置游戏目录...", null, (_, _) => SelectGameDirectory());
         ToolStripMenuItem createShortcutsItem = new("生成桌面快捷方式", null, (_, _) => CreateDesktopShortcuts());
+        ToolStripMenuItem autoStartItem = new("开机自启", null, (_, _) => ToggleAutoStart());
 
         ToolStripMenuItem clickThroughItem = new("鼠标穿透", null, (_, _) => SetClickThrough(!_clickThrough));
 
@@ -501,6 +529,7 @@ internal sealed class MainForm : Form
         menu.Items.Add(clickThroughItem);
         menu.Items.Add(gameDirectoryItem);
         menu.Items.Add(createShortcutsItem);
+        menu.Items.Add(autoStartItem);
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add(sizeMenu);
         menu.Items.Add(positionMenu);
@@ -519,13 +548,22 @@ internal sealed class MainForm : Form
             bottomRightItem,
             bottomLeftItem,
             middleLeftItem,
-            topLeftItem);
+            topLeftItem,
+            autoStartItem);
 
         return menu;
     }
 
     private bool EnsureGameDirectoryConfigured()
     {
+        if (_watchMode)
+        {
+            // Watch mode only watches the process name; it never launches the
+            // game, so it must not ask for the game directory - a sign-in would
+            // pop a modal folder picker on every boot.
+            return true;
+        }
+
         if (TryNormalizeAndValidateDirectory(_settings.GameDirectory, out string? normalizedDirectory, out _))
         {
             _settings.GameDirectory = normalizedDirectory;
@@ -911,9 +949,12 @@ internal sealed class MainForm : Form
         if (shouldBeActive != _isActive)
         {
             _isActive = shouldBeActive;
-            MarkRenderDirtyOnFailure(RenderLayeredWindow(), now);
+            if (Visible)
+            {
+                MarkRenderDirtyOnFailure(RenderLayeredWindow(), now);
+            }
         }
-        else if (_renderDirty && now - _lastRenderRetryTick >= RenderRetryIntervalMs)
+        else if (_renderDirty && Visible && now - _lastRenderRetryTick >= RenderRetryIntervalMs)
         {
             // Transient render failures self-heal here at ~1 retry/second,
             // throttled so the diagnostic log cannot be flooded.
@@ -944,7 +985,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        ApplyPlacement(_position);
+        ApplyDotMetrics();
 
         // The first visible render keeps the hard exit as a last resort, but
         // arms the self-heal flag so later ticks can recover transient faults.
@@ -957,9 +998,39 @@ internal sealed class MainForm : Form
         }
 
         _renderDirty = false;
-        _initialRenderCompleted = true;
+        StartTimers();
+    }
+
+    private void StartTimers()
+    {
         _statusTimer.Start();
         _gameTimer?.Start();
+    }
+
+    private void ShowDot()
+    {
+        if (Visible || _shuttingDown || _resourcesDisposed)
+        {
+            return;
+        }
+
+        ApplyDotMetrics();
+
+        // The layered render refuses to paint a hidden window, so the window has
+        // to be up before the dot is drawn.
+        Visible = true;
+
+        MarkRenderDirtyOnFailure(RenderLayeredWindow(), Environment.TickCount64);
+    }
+
+    private void HideDot()
+    {
+        if (!Visible || _shuttingDown || _resourcesDisposed)
+        {
+            return;
+        }
+
+        Visible = false;
     }
 
     private bool RenderLayeredWindow()
@@ -1034,13 +1105,21 @@ internal sealed class MainForm : Form
 
         int diameter = GetEffectiveDotDiameter();
         int maxDiameter = Math.Min(width, height) - DotMargin;
-        if (diameter <= 0 || maxDiameter <= 0 || diameter > maxDiameter)
+        if (maxDiameter <= 0)
         {
             return LogRenderFailure(
                 "Validate dot diameter",
                 0,
                 new InvalidOperationException(
                     $"Diameter={diameter}, maximum={maxDiameter}, client size={width}x{height}."));
+        }
+
+        if (diameter <= 0 || diameter > maxDiameter)
+        {
+            // Contain instead of failing: a stale window size must never take
+            // the whole tool down, the dot is clamped to what actually fits.
+            LogDiagnostic($"Clamp dot diameter to {maxDiameter} (requested {diameter})", 0);
+            diameter = maxDiameter;
         }
 
         int x = (width - diameter) / 2;
@@ -1343,11 +1422,23 @@ internal sealed class MainForm : Form
         {
             _gameSeen = true;
             _gameMissingSinceTick = null;
+            if (_watchMode)
+            {
+                ShowDot();
+            }
+
             return;
         }
 
         if (!_gameSeen)
         {
+            if (_watchMode)
+            {
+                // Watch mode waits for as long as it takes: the game may be
+                // started hours after the machine boots.
+                return;
+            }
+
             if (!_gameStartTimeoutNotified &&
                 HasElapsed(_gameStartTick, now, GameStartTimeout))
             {
@@ -1361,7 +1452,14 @@ internal sealed class MainForm : Form
         _gameMissingSinceTick ??= now;
         if (HasElapsed(_gameMissingSinceTick.Value, now, GameExitGracePeriod))
         {
-            RequestShutdown();
+            if (_watchMode)
+            {
+                HideDot();
+            }
+            else
+            {
+                RequestShutdown();
+            }
         }
     }
 
@@ -1426,6 +1524,7 @@ internal sealed class MainForm : Form
         _settings.DotSize = dotSize;
         SaveSettingsSafely();
         UpdateMenuChecks();
+        ApplyDotMetrics();
         MarkRenderDirtyOnFailure(RenderLayeredWindow(), Environment.TickCount64);
     }
 
@@ -1438,7 +1537,7 @@ internal sealed class MainForm : Form
 
         _position = position;
         _settings.Position = position;
-        ApplyPlacement(position);
+        ApplyDotMetrics();
         SaveSettingsSafely();
         UpdateMenuChecks();
         MarkRenderDirtyOnFailure(RenderLayeredWindow(), Environment.TickCount64);
@@ -1642,17 +1741,47 @@ internal sealed class MainForm : Form
 
     private int GetEffectiveDotDiameter()
     {
-        int desired = _dotSize switch
+        Screen screen = GetPlacementScreen();
+        int deviceHeight = Math.Max(1, screen.Bounds.Height);
+        double ratio = _dotSize switch
         {
-            DotSizeOption.Small => 18,
-            DotSizeOption.Medium => 26,
-            DotSizeOption.Large => 34,
-            _ => 26
+            DotSizeOption.Small => SmallDotScreenRatio,
+            DotSizeOption.Medium => MediumDotScreenRatio,
+            DotSizeOption.Large => LargeDotScreenRatio,
+            _ => MediumDotScreenRatio
         };
 
-        int maxAllowed = Math.Max(6, Math.Min(ClientSize.Width, ClientSize.Height) - DotMargin);
-        int diameter = Math.Min(desired, maxAllowed);
-        return diameter % 2 == 0 ? diameter : Math.Max(6, diameter - 1);
+        int diameter = (int)Math.Round(deviceHeight * ratio);
+        if (diameter < 12)
+        {
+            diameter = 12;
+        }
+
+        return diameter % 2 == 0 ? diameter : diameter - 1;
+    }
+
+    /// <summary>
+    /// Keeps the window sized around the dot and re-applies the placement.
+    /// The window follows the dot, never the other way round: a bigger dot on a
+    /// bigger screen must still fit inside the layered window.
+    /// </summary>
+    private void ApplyDotMetrics()
+    {
+        // Place first, then measure: the size has to be derived from the screen
+        // the window actually ends up on. Measuring first would size the dot for
+        // the primary screen while the window sits on another one.
+        ApplyPlacement(_position);
+        _placementInitialized = true;
+
+        int diameter = GetEffectiveDotDiameter();
+        Size target = new(diameter + DotMargin * 2, diameter + DotMargin * 2);
+        if (ClientSize != target)
+        {
+            ClientSize = target;
+        }
+
+        // Re-clamp: the new size can push the window off the working area.
+        ApplyPlacement(_position);
     }
 
     private Color GetCurrentDotColor()
@@ -1680,6 +1809,52 @@ internal sealed class MainForm : Form
         items.BottomLeftItem.Checked = _position == DockPosition.BottomLeft;
         items.MiddleLeftItem.Checked = _position == DockPosition.MiddleLeft;
         items.TopLeftItem.Checked = _position == DockPosition.TopLeft;
+        items.AutoStartItem.Checked = AutoStartManager.IsEnabledForCurrentExecutable();
+    }
+
+    /// <summary>
+    /// Turns the optional start-with-Windows entry on or off. The entry is only
+    /// written when the user asks for it, and points at the running executable
+    /// in watch mode so the dot appears as soon as the game starts.
+    /// </summary>
+    private void ToggleAutoStart()
+    {
+        try
+        {
+            if (AutoStartManager.IsEnabledForCurrentExecutable())
+            {
+                AutoStartManager.Disable();
+                _trayIcon.ShowBalloonTip(
+                    3000,
+                    "E键监控工具",
+                    "已关闭开机自启。",
+                    ToolTipIcon.Info);
+            }
+            else
+            {
+                bool replacedStale = AutoStartManager.IsEnabled();
+                AutoStartManager.Enable(AutoStartManager.GetExecutablePath(), "--watch");
+                _trayIcon.ShowBalloonTip(
+                    3000,
+                    "E键监控工具",
+                    replacedStale
+                        ? "已开启开机自启（旧的失效路径已替换为当前 EXE）。"
+                        : "已开启开机自启：开机后自动在托盘待命，游戏启动时显示圆点。",
+                    ToolTipIcon.Info);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogDiagnostic("Toggle auto start", 0, ex);
+            MessageBox.Show(
+                this,
+                $"设置开机自启失败：\n{ex.Message}",
+                "E键监控工具",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+
+        UpdateMenuChecks();
     }
 
     private void HandleMouseDown(object? sender, MouseEventArgs e)
@@ -1773,6 +1948,11 @@ internal sealed class MainForm : Form
             SaveSettingsSafely();
             UpdateMenuChecks();
         }
+
+        // The dot may have been dropped on a screen with a different
+        // resolution: the size has to follow the screen it now lives on.
+        ApplyDotMetrics();
+        MarkRenderDirtyOnFailure(RenderLayeredWindow(), Environment.TickCount64);
     }
 
     private void CancelDrag()
@@ -1972,7 +2152,8 @@ internal sealed class MainForm : Form
         ToolStripMenuItem BottomRightItem,
         ToolStripMenuItem BottomLeftItem,
         ToolStripMenuItem MiddleLeftItem,
-        ToolStripMenuItem TopLeftItem);
+        ToolStripMenuItem TopLeftItem,
+        ToolStripMenuItem AutoStartItem);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct BitmapInfoHeader

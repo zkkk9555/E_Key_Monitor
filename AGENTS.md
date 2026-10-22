@@ -64,6 +64,7 @@ E_Key_Monitor/
 ├── .gitignore                            # 构建产物、本地状态和敏感文件排除规则
 ├── .scratch/                             # 工作流留痕：spec / issues / NOTES，随仓库提交
 ├── AGENTS.md                             # 面向 AI 和维护者的当前项目说明
+├── AutoStartManager.cs                   # 开机自启：当前用户 Run 键的读写
 ├── Create_Naraka_Monitor_Shortcut.bat    # 维护者入口：创建指向中文 BAT 的两个桌面快捷方式
 ├── Create_Naraka_Monitor_Shortcut.ps1    # 维护者入口：创建指向中文 BAT 的两个桌面快捷方式
 ├── docs/adr/                             # 决策记录：一条难回退的决策一个文件
@@ -73,9 +74,9 @@ E_Key_Monitor/
 ├── E_Key_Monitor.csproj                  # .NET 8 WinForms 项目定义（含单文件发布开关）
 ├── E_Key_Monitor.ico                     # EXE、托盘和独立快捷方式的多尺寸图标
 ├── E键监控工具中文使用说明书.md           # 面向便携包使用者的中文说明书
-├── MainForm.cs                           # 配置、Hook、绘制、托盘、拖动、联合启动、快捷方式、游戏跟随和清理
+├── MainForm.cs                           # 配置、Hook、绘制、托盘、拖动、圆点尺寸模型、联合启动、快捷方式、游戏跟随和清理
 ├── Package_E_Key_Monitor.ps1             # 生成便携版单文件包
-├── Program.cs                            # 解析 --follow-game / --launch-game 并启动 MainForm
+├── Program.cs                            # 解析 --follow-game / --launch-game / --watch 并启动 MainForm
 ├── README.md                             # 面向用户的使用说明
 ├── Start_E_Key_Monitor.ps1               # 独立启动正式监控工具
 ├── Start_Naraka_With_Monitor.bat         # 正式启动的 ASCII 包装器
@@ -119,14 +120,16 @@ E键监控工具中文使用说明书.md
 `Program.cs` 读取命令行参数：
 
 - 不带参数：普通独立模式。
-- 带 `--follow-game`：游戏跟随模式。
+- 带 `--follow-game`：游戏跟随模式，游戏结束后**程序退出**。
 - 带 `--launch-game`：游戏跟随模式，并在目录验证后启动原始 `StartGame.exe`。
+- 带 `--watch`：**常驻跟随模式**，只在游戏运行时显示圆点；游戏结束圆点消失，程序留在托盘。
 
-所有模式都会创建同一个 `MainForm`。三种模式的差别只在**是否要求游戏目录**：
+所有模式都会创建同一个 `MainForm`。四种模式的差别在**是否要求游戏目录**和**游戏结束后怎么办**：
 
-- 独立模式（无参数）：目录**可选**。没有有效目录时弹出「设置游戏目录...」，取消后还会追问一次：选「是」跳过并只跑独立监控，选「否」重新选目录，选「取消」退出程序。
-- `--follow-game`：**必须**有有效目录，否则取消即退出。
-- `--launch-game`：**必须**有有效目录，否则取消即退出。
+- 独立模式（无参数）：目录**可选**。没有有效目录时弹出「设置游戏目录...」，取消后还会追问一次：选「是」跳过并只跑独立监控，选「否」重新选目录，选「取消」退出程序。游戏退出与它无关。
+- `--follow-game`：**必须**有有效目录，否则取消即退出；游戏消失后**程序退出**。
+- `--launch-game`：**必须**有有效目录，否则取消即退出；先启动原始 `StartGame.exe`，再跟随游戏。
+- `--watch`：**不需要**游戏目录——它只看进程名，从不启动游戏；开机自启也因此**不会在每次登录时弹目录选择框**。启动时**不画圆点**（只在托盘待命），游戏进程出现才显示，游戏消失约 5 秒后**隐藏圆点但程序继续留在托盘**，等待下一次开局。不套用 10 分钟启动超时。
 
 独立模式不观察游戏进程，也不会因游戏退出自动关闭，需要用户从托盘菜单退出。目录有效后，即使游戏进程不存在也可以运行。
 
@@ -163,14 +166,18 @@ E键监控工具中文使用说明书.md
 
 默认视觉配置：
 
-- 窗口：`40 x 40`
-- 圆点：中号，`26px`
+- 圆点：中号，占屏幕高度的 `3%`
 - 未激活偏白色：`ARGB(255, 235, 235, 235)`
 - 激活高亮青绿色：`ARGB(255, 65, 255, 145)`
 - 全局透明度：`0.8`
 - 默认位置：左中
+- 窗口尺寸：由圆点推导（直径 + 2×6px 边距），不再由配置指定
 
-圆点大小：小 `18px`、中 `26px`、大 `34px`。
+圆点大小：小 `2%`、中 `3%`、大 `4%`（屏幕**设备像素**高度）。
+
+程序是 **Per-Monitor V2** DPI 感知（`Program.cs`），坐标就是设备像素，所以这个百分比**在构造上就不受 Windows 缩放百分比影响**：缩放只改变逻辑坐标到设备像素的换算，不改变圆点占屏幕的比例。150% 缩放的 2560x1600 屏上 3% = 48 物理像素；按同样规则，100% 缩放的 1080p 屏上 3% = 32 物理像素——**这是按公式推出来的，本机只有一块屏，没有做过多屏实测**。
+
+圆点换屏时必须重算：`WM_DPICHANGED`（缩放变了）、拖到另一块屏（`FinishDrag`）、切换位置预设（`SetDockPosition`）都会调 `ApplyDotMetrics()` 重新按新屏幕高度定尺寸并重绘。
 
 ## 鼠标穿透、菜单和拖动
 
@@ -209,7 +216,6 @@ AppContext.BaseDirectory\config.json
 {
   "key": "E",
   "activeTime": 200,
-  "windowSize": 40,
   "opacity": 0.8,
   "dotSize": "Medium",
   "position": "MiddleLeft",
@@ -219,6 +225,8 @@ AppContext.BaseDirectory\config.json
   "gameDirectory": null
 }
 ```
+
+`windowSize` 已删除：窗口尺寸由圆点直径推导，留着它就会和圆点打架。旧配置文件里的这个字段会被忽略（读的时候丢弃、保存时不再写回）。
 
 说明：
 
@@ -238,12 +246,12 @@ NarakaBladepoint
 准确流程：
 
 1. 监控工具启动后，每约 `1` 秒调用 `Process.GetProcessesByName`。
-2. 第一次发现 `NarakaBladepoint` 前，最多等待约 `10` 分钟。
-3. 等待超时会弹一个托盘气泡，然后按退出流程关闭。
+2. 第一次发现 `NarakaBladepoint` 前，最多等待约 `10` 分钟（`--watch` 不设这个上限，它一直等）。
+3. 等待超时会弹一个托盘气泡，然后按退出流程关闭（`--watch` 不适用）。
 4. 发现游戏后记录 `_gameSeen = true`。
 5. `StartGame.exe` 是否继续存在不影响监控工具。
 6. 游戏进程消失后开始计算宽限时间。
-7. 连续约 `5` 秒未发现游戏进程后调用 `RequestShutdown`。
+7. 连续约 `5` 秒未发现游戏进程后：`--follow-game` 调用 `RequestShutdown`；`--watch` 调用 `HideDot()`（圆点消失，程序留下）。
 8. 每次枚举出的 `Process` 对象都必须 `Dispose`。
 
 不要改成观察 `StartGame`，不要使用固定 PID，也不要直接启动 `NarakaBladepoint.exe`。
@@ -307,6 +315,16 @@ E键监控工具.lnk            -> 启动E键监控工具.bat（中文 BAT 入�
 - 这一套指向源码目录里的中文 BAT：`E键监控工具.lnk` 用监控 EXE 的图标，`永劫无间（E键提示）.lnk` 用游戏启动器的图标；第二个快捷方式的名字也和 A 不同。
 - **两条路径都会写 `E键监控工具.lnk`**，所以跑过 B 之后，A 那个就被覆盖成指向 BAT 的版本了。
 - 日常使用只走 A；B 只是维护入口。改桌面快捷方式前先想清楚改的是哪一套。
+
+## 开机自启
+
+托盘菜单有「开机自启」勾选项，由 `AutoStartManager.cs` 实现：
+
+- 写入 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`，值名 `E_Key_Monitor`，值 = `"<当前 EXE 绝对路径>" --watch`。
+- **默认关闭**：程序自己绝不写这个键，只有用户在托盘点一下开关才写；再点一下就删掉，删除即完全恢复。
+- 不需要管理员权限，不需要安装器，删掉注册表值就等于关掉。
+- 菜单勾选状态读**真实注册表**：只有当注册表里记录的路径**与当前运行的 EXE 完全相同**（不做前缀匹配）才算「已开启」；便携文件夹被挪走后旧路径失效，菜单会显示未勾选，重新点一次开关就会用新路径覆盖旧条目。
+- 开机启动的实例带 `--watch`，所以开机后它只在托盘待命，游戏开了才显示圆点。
 
 ## 脚本编码规则
 
@@ -390,13 +408,16 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\verify-conventions.p
 - VERIFIED：`dotnet build -c Release` 退出码 0，0 个警告、0 个错误。
 - VERIFIED：`dotnet publish -c Release -r win-x64 --self-contained true` 退出码 0；产物为单文件 EXE（约 154 MB）加 `config.json`，裸 publish 另带 `E_Key_Monitor.pdb`。
 - VERIFIED：`dotnet format E_Key_Monitor.csproj --verify-no-changes --no-restore` 退出码 0。
-- VERIFIED：8 个根目录 BAT 均为纯 ASCII；仓库内 6 个 `.ps1` 均为 UTF-8 with BOM；`Test-Path` 一律 `-LiteralPath`；根目录 `config.json` 可解析、10 个字段齐、`gameDirectory` 为 null、带 BOM。（复算：`tools\verify-conventions.ps1` 的 `bat-ascii` / `ps1-bom` / `config-fields`）
+- VERIFIED：8 个根目录 BAT 均为纯 ASCII；仓库内 6 个 `.ps1` 均为 UTF-8 with BOM；`Test-Path` 一律 `-LiteralPath`；根目录 `config.json` 可解析、9 个字段齐、`gameDirectory` 为 null、带 BOM。（复算：`tools\verify-conventions.ps1` 的 `bat-ascii` / `ps1-bom` / `config-fields`）
 - VERIFIED：安全边界静态搜索零命中——无输入模拟 API、无鼠标 Hook、无进程注入；`NarakaBladepoint.exe` 只出现在目录校验与提示文案里，不作为启动目标；根目录入口脚本无硬编码绝对路径。
 - VERIFIED：便携包契约（发布 2 件、便携包 3 件）由打包脚本自带断言。
 - VERIFIED：桌面当前没有本项目生成的 `.lnk`；源码目录没有 `.lnk`。快捷方式只能由运行中的 EXE 生成。（复算：`Get-ChildItem -Path "$env:USERPROFILE\Desktop" -Filter *.lnk` 与 `git ls-files -- '*.lnk'`）
 - ENVIRONMENT：本机没有游戏安装（`E:\` 不存在），因此「联合启动逻辑」里的 E 盘路径只是部署机示例；本机无法验证游戏相关流程。
 - PARTIAL：项目没有测试工程，`dotnet test` 退出码 0 不代表有自动化测试通过；本轮的门是上面的约定校验器加构建三命令。
-- UNKNOWN（未执行，不声称通过）：模拟 `E` 输入、验证圆点颜色切换、实际启动游戏、验证游戏退出后的 5 秒跟随清理、托盘菜单操作、从托盘创建桌面快捷方式、便携包双击运行。
+- VERIFIED（本轮新增）：圆点按屏幕比例生效——本机 2560x1600 屏上窗口 60x60 设备像素、圆点直径 48 设备像素（= 屏幕高度 3%），改前是固定 26 像素。**只在一块屏上实测过**；多屏不同分辨率下的重算路径（`WM_DPICHANGED` / 拖动 / 换预设）已接上但未在真多屏环境验证。
+- VERIFIED（本轮新增）：`--watch` 行为——游戏进程不在时圆点隐藏；出现一个进程名为 `NarakaBladepoint` 的进程后圆点显示；该进程结束后约 5 秒圆点再次隐藏，且**程序进程仍在**。
+- VERIFIED（本轮新增）：开机自启的注册表读写——默认无条目；开启后值为 `"<EXE 路径>" --watch`；关闭后条目被删除；路径失效时不算「已开启」。
+- UNKNOWN（未执行，不声称通过）：模拟 `E` 输入、验证圆点颜色切换、实际启动游戏、真实开机后自启是否生效、托盘菜单的**点击**操作、从托盘创建桌面快捷方式、便携包双击运行。
 
 ## 修改原则
 
