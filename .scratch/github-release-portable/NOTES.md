@@ -25,6 +25,12 @@ EXE SHA-256：E5B626766A48FD5007EB0EE31538A3DC896182E7701C8EEDBCE706D4BC372A47
 冒烟：把**要发的那个 EXE** 复制到临时目录 + 配 config -> 进程存活、窗口可见 -> 结束
 ```
 
+## 发布过程中的一个坑（已收拾干净）
+
+第一次 `gh release create`（前台同步执行）撞上调用时限被砍，但它**已经把 release 建出来了**，只是一个 draft、附件没传完；第二次后台执行又建了一个同 tag 的正式版。结果 GitHub 上短暂存在**两个 v1.0.0**：一个 draft（assets=0）、一个已发布（assets=2）。
+
+已用 `gh api -X DELETE repos/zkkk9555/E_Key_Monitor/releases/420183039` 删掉那个空 draft，回读确认现在只剩**一个** v1.0.0（draft=false, assets=2），tag 仍指向 45a9ef5，`/releases/latest` 正常。
+
 ## 顺手修的真问题
 
 `dotnet` 不在 PATH 时 `Package_E_Key_Monitor.ps1` 直接崩（这台笔记本就是如此，用户在这台机器上打包会撞上）。改成：先找 PATH，再找 `%ProgramFiles%\dotnet\dotnet.exe`，都没有才给中文报错。修后**不带 PATH 重跑打包成功**，且 EXE 的 SHA-256 与之前一致（可重复构建）。开发脚本 `Start_Naraka_With_Monitor_Dev.ps1` 同步。
