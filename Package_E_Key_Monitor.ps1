@@ -86,7 +86,21 @@ try {
         '-p:DebugType=None',
         '-p:DebugSymbols=false'
     )
-    & dotnet @publishArguments
+    # dotnet is not always on PATH (a fresh machine often has it only under
+    # Program Files), so look there before giving up.
+    $dotnetCommand = Get-Command -Name 'dotnet' -CommandType Application -ErrorAction SilentlyContinue
+    if ($null -eq $dotnetCommand) {
+        $dotnetFallback = Join-Path $env:ProgramFiles 'dotnet\dotnet.exe'
+        if (Test-Path -LiteralPath $dotnetFallback -PathType Leaf) {
+            $dotnetCommand = $dotnetFallback
+        }
+    }
+
+    if ($null -eq $dotnetCommand) {
+        throw '找不到 dotnet。请先安装 .NET 8 SDK，或把 dotnet 加入 PATH。'
+    }
+
+    & $dotnetCommand @publishArguments
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed with exit code $LASTEXITCODE"
     }

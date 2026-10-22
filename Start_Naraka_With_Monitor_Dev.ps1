@@ -75,6 +75,14 @@ function Get-ConfiguredGameDirectory {
 try {
     $DotNetCommand = Get-Command -Name 'dotnet' -CommandType Application -ErrorAction SilentlyContinue
     if ($null -eq $DotNetCommand) {
+        $dotnetFallback = Join-Path $env:ProgramFiles 'dotnet\dotnet.exe'
+        if (Test-Path -LiteralPath $dotnetFallback -PathType Leaf) {
+            $DotNetCommand = $dotnetFallback
+        }
+    }
+
+    $DotNetCommandPath = if ($DotNetCommand -is [string]) { $DotNetCommand } else { $DotNetCommand.Source }
+    if ($null -eq $DotNetCommand) {
         Exit-WithError '找不到 dotnet。请先安装 .NET 8 SDK，并确认 dotnet 可以在命令行中运行。'
     }
 
@@ -87,7 +95,7 @@ try {
     $GameLauncher = $ConfiguredGame[1]
 
     Start-Process `
-        -FilePath $DotNetCommand.Source `
+        -FilePath $DotNetCommandPath `
         -ArgumentList @(
             'run',
             '--project',

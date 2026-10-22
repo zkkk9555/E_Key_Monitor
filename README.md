@@ -51,6 +51,21 @@ E:\Youxi\网吧极速版\program
 
 “E键监控工具”和“启动StartGame和监控”两个快捷方式都直接使用监控 EXE 的图标，不依赖 BAT 图标。
 
+## 下载（游戏机上就用这个）
+
+去仓库的 **Releases** 页面下载（取最新版本）：
+
+<https://github.com/zkkk9555/E_Key_Monitor/releases>
+
+| 附件 | 说明 |
+| --- | --- |
+| `E_Key_Monitor.exe` | **单个 EXE**。Windows x64 自包含，目标电脑**不需要装 .NET**。下载后放进一个空文件夹，双击即可。 |
+| `E_Key_Monitor-portable.zip` | 完整便携包：EXE + `config.json` + 中文说明书。解压即用。 |
+
+第一次运行会让你选一次游戏目录（要同时包含 `StartGame.exe` 和 `NarakaBladepoint.exe`），选完记在 EXE 旁边的 `config.json` 里。
+
+想要「开机自动待命、游戏才显示圆点」：启动后右键托盘图标 → 打开「**开机自启**」。
+
 ## 用户入口
 
 最终便携包只需要一个 `E_Key_Monitor.exe`。程序运行后，从托盘菜单选择“生成桌面快捷方式”，会在桌面创建两个直接指向 EXE 的快捷方式：

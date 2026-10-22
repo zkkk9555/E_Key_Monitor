@@ -2,6 +2,17 @@
 
 更新时间：2026-10-22
 
+## 零、去哪儿下载
+
+仓库的 Releases 页面（取最新版本）：
+
+<https://github.com/zkkk9555/E_Key_Monitor/releases>
+
+| 附件 | 说明 |
+| --- | --- |
+| `E_Key_Monitor.exe` | **单个 EXE**。Windows x64 自包含，目标电脑不需要装 .NET。下载后放进一个空文件夹，双击即可。 |
+| `E_Key_Monitor-portable.zip` | 完整便携包（EXE + config.json + 本说明书），解压即用。 |
+
 ## 一、便携文件夹里有什么
 
 最终便携文件夹只需要下面三个文件：
